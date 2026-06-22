@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 
+from app.analyzer.analyzer import analyze_user_repositories
 from app.config import settings
 from app.github.client import (
     GitHubAPIError,
@@ -9,6 +10,18 @@ from app.github.client import (
 )
 
 app = FastAPI(title=settings.APP_NAME)
+
+
+def _handle_github_exceptions(exc: Exception) -> None:
+    """Convert GitHub client exceptions into FastAPI HTTP responses."""
+    if isinstance(exc, GitHubUserNotFoundError):
+        raise HTTPException(status_code=404, detail="GitHub user not found.")
+    if isinstance(exc, GitHubRateLimitError):
+        raise HTTPException(status_code=429, detail="GitHub API rate limit exceeded.")
+    if isinstance(exc, GitHubAPIError):
+        raise HTTPException(
+            status_code=503, detail="GitHub service is temporarily unavailable."
+        )
 
 
 @app.get("/")
@@ -25,16 +38,8 @@ def health_check():
 async def get_github_user_repos(username: str):
     try:
         repos = await get_user_repositories(username)
-    except GitHubUserNotFoundError:
-        raise HTTPException(
-            status_code=404, detail=f"GitHub user '{username}' not found."
-        )
-    except GitHubRateLimitError:
-        raise HTTPException(status_code=429, detail="GitHub API rate limit exceeded.")
-    except GitHubAPIError:
-        raise HTTPException(
-            status_code=503, detail="GitHub service is temporarily unavailable."
-        )
+    except (GitHubUserNotFoundError, GitHubRateLimitError, GitHubAPIError) as exc:
+        _handle_github_exceptions(exc)
 
     github_username = repos[0]["owner"]["login"] if repos else username
 
@@ -59,3 +64,11 @@ async def get_github_user_repos(username: str):
         "repository_count": len(repositories),
         "repositories": repositories,
     }
+
+
+@app.get("/analyze/{username}")
+async def analyze_github_user(username: str):
+    try:
+        return await analyze_user_repositories(username)
+    except (GitHubUserNotFoundError, GitHubRateLimitError, GitHubAPIError) as exc:
+        _handle_github_exceptions(exc)

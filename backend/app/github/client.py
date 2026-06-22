@@ -60,3 +60,32 @@ async def get_user_repositories(username: str) -> list[dict]:
         raise GitHubAPIError(f"GitHub API returned {response.status_code}")
 
     return response.json()
+
+
+async def get_repository_contents(owner: str, repo: str) -> list[dict]:
+    """
+    Fetch the root directory contents of a repository.
+    Returns an empty list if the repository is empty (no commits yet).
+    Raises:
+    GitHubRateLimitError: if the rate limit has been exceeded (403).
+    GitHubAPIError: for any other unexpected error response.
+    """
+    url = f"{BASE_URL}/repos/{owner}/{repo}/contents/"
+
+    async with httpx.AsyncClient(timeout=GITHUB_TIMEOUT) as client:
+        response = await client.get(url, headers=_build_headers())
+
+    # Empty repositories return 404 on the contents endpoint
+    if response.status_code == 404:
+        return []
+
+    if response.status_code == 403:
+        data = response.json()
+        if "rate limit" in data.get("message", "").lower():
+            raise GitHubRateLimitError()
+        raise GitHubAPIError(data.get("message", "Forbidden"))
+
+    if response.is_error:
+        raise GitHubAPIError(f"GitHub API returned {response.status_code}")
+
+    return response.json()
