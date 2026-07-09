@@ -7,10 +7,14 @@ It has no knowledge of GitHub, HTTP, or application state, and no side
 effects; making it straightforward to test in isolation.
 """
 
-from app.detector.models import Entry, MatchResult, Rule
+from app.detector.models import Entry, FileContents, MatchResult, Rule
 
 
-def detect(entries: list[Entry], rules: list[Rule]) -> list[MatchResult]:
+def detect(
+    entries: list[Entry],
+    rules: list[Rule],
+    file_contents: FileContents | None = None,
+) -> list[MatchResult]:
     """
     Evaluate all rules against the entry list and return a MatchResult for
     every rule whose matchers are all satisfied.
@@ -24,6 +28,9 @@ def detect(entries: list[Entry], rules: list[Rule]) -> list[MatchResult]:
     Args:
         entries: Flat list of all entries in the repository tree.
         rules:   List of technology rules to evaluate.
+        file_contents: Optional mapping of path -> decoded file content, for
+            content-based matchers (HasFileContent, HasDependency, ...).
+            Matchers that don't need content simply ignore this.
 
     Returns:
         List of MatchResult objects for every matched rule.
@@ -36,5 +43,5 @@ def detect(entries: list[Entry], rules: list[Rule]) -> list[MatchResult]:
             priority=rule.priority,
         )
         for rule in rules
-        if all(matcher.matches(entries) for matcher in rule.matchers)
+        if all(matcher.matches(entries, file_contents) for matcher in rule.matchers)
     ]

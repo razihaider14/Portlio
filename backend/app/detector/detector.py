@@ -32,11 +32,15 @@ def detect_technologies(repository: dict) -> list[str]:
     Args:
         repository: a dict containing:
             "contents": list of entry dicts, each with "path", "name", "type".
+            "file_contents" (optional): dict mapping a path from "contents"
+                to its decoded text content, enabling content-based matchers
+                (HasFileContent, HasDependency, ...). Omit or leave empty to
+                match today's tree-only behavior exactly.
 
     Returns:
         Alphabetically sorted list of detected technology names.
     """
-    results = detect(_to_entries(repository), RULES)
+    results = detect(_to_entries(repository), RULES, repository.get("file_contents"))
     return sorted(r.name for r in results)
 
 
@@ -50,9 +54,11 @@ def detect_technologies_detailed(repository: dict) -> list[MatchResult]:
     Args:
         repository: a dict containing:
             "contents": list of entry dicts, each with "path", "name", "type".
+            "file_contents" (optional): dict mapping a path from "contents"
+                to its decoded text content; see detect_technologies().
 
     Returns:
         List of MatchResult objects, sorted by priority descending then name.
     """
-    results = detect(_to_entries(repository), RULES)
+    results = detect(_to_entries(repository), RULES, repository.get("file_contents"))
     return sorted(results, key=lambda r: (-r.priority, r.name))

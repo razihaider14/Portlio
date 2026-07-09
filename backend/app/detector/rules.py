@@ -28,10 +28,10 @@ Priority scale:
 from app.detector.matchers import (
     AllOf,
     AnyOf,
+    HasDependency,
     HasDirectory,
     HasExtension,
     HasFilename,
-    HasFileContent,
     HasFileGlob,
     HasPath,
 )
@@ -579,6 +579,28 @@ RULES: list[Rule] = [
         matchers=[HasFilename("schema.prisma")],
         category=RuleCategory.DATABASE,
         confidence=1.0,
+        priority=30,
+    ),
+    # Content-based detection: these rely on downloaded manifest content
+    # (see app.github.content_targets / analyzer include_content=True) and
+    # simply never match when content wasn't downloaded, so they're safe to
+    # keep enabled unconditionally.
+    Rule(
+        # FastAPI has no generated config file of its own; it's declared as
+        # a regular dependency, so filename-based detection isn't possible.
+        name="FastAPI",
+        matchers=[HasDependency("fastapi")],
+        category=RuleCategory.FRAMEWORK,
+        confidence=0.95,
+        priority=30,
+    ),
+    Rule(
+        # Same story for React: no unique config file, only a package.json
+        # dependency entry.
+        name="React",
+        matchers=[HasDependency("react")],
+        category=RuleCategory.FRAMEWORK,
+        confidence=0.9,  # "react" as a dependency name is occasionally used loosely
         priority=30,
     ),
 ]

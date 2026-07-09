@@ -17,6 +17,9 @@ def d(path: str) -> dict:
     return {"path": path, "name": path.rsplit("/", 1)[-1], "type": "dir"}
 
 
-def repo(*entries: dict) -> dict:
+def repo(*entries: dict, file_contents: dict | None = None) -> dict:
     """Assemble entry dicts into the repository shape the detector expects."""
-    return {"contents": list(entries)}
+    repository = {"contents": list(entries)}
+    if file_contents is not None:
+        repository["file_contents"] = file_contents
+    return repository

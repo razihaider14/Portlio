@@ -67,8 +67,10 @@ async def get_github_user_repos(username: str):
 
 
 @app.get("/analyze/{username}")
-async def analyze_github_user(username: str):
+async def analyze_github_user(username: str, include_content: bool = False):
     try:
-        return await analyze_user_repositories(username)
+        return await analyze_user_repositories(
+            username, include_content=include_content
+        )
     except (GitHubUserNotFoundError, GitHubRateLimitError, GitHubAPIError) as exc:
         _handle_github_exceptions(exc)

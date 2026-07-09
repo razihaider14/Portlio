@@ -828,3 +828,56 @@ class TestRealWorldScenarios:
         assert "Ruby on Rails" in result
         assert "GitLab CI" in result
         assert "Docker Compose" in result
+
+
+class TestFastAPI:
+    def test_detected_by_dependency_in_requirements_txt(self):
+        result = detect_technologies(
+            repo(
+                f("main.py"),
+                f("requirements.txt"),
+                file_contents={"requirements.txt": "fastapi==0.100\nuvicorn\n"},
+            )
+        )
+        assert "FastAPI" in result
+
+    def test_not_detected_without_file_contents(self):
+        # Same tree, but content wasn't downloaded (include_content=False),
+        # must not false-positive just because requirements.txt exists.
+        result = detect_technologies(repo(f("main.py"), f("requirements.txt")))
+        assert "FastAPI" not in result
+
+    def test_not_detected_when_dependency_absent(self):
+        result = detect_technologies(
+            repo(
+                f("requirements.txt"),
+                file_contents={"requirements.txt": "flask==2.0\n"},
+            )
+        )
+        assert "FastAPI" not in result
+
+
+class TestReact:
+    def test_detected_by_dependency_in_package_json(self):
+        result = detect_technologies(
+            repo(
+                f("package.json"),
+                file_contents={
+                    "package.json": '{"dependencies": {"react": "^18.0.0"}}'
+                },
+            )
+        )
+        assert "React" in result
+
+    def test_not_detected_without_file_contents(self):
+        result = detect_technologies(repo(f("package.json")))
+        assert "React" not in result
+
+    def test_not_detected_when_dependency_absent(self):
+        result = detect_technologies(
+            repo(
+                f("package.json"),
+                file_contents={"package.json": '{"dependencies": {"vue": "^3.0.0"}}'},
+            )
+        )
+        assert "React" not in result

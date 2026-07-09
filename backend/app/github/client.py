@@ -1,6 +1,11 @@
+import asyncio
+import base64
+import binascii
+
 import httpx
 
 from app.config import settings
+from app.github.content_targets import CONTENT_TARGET_FILENAMES, select_content_targets
 
 BASE_URL = "https://api.github.com"
 GITHUB_TIMEOUT = 10.0
@@ -104,6 +109,93 @@ async def get_repository_tree(owner: str, repo: str) -> list[dict]:
             "path": entry["path"],
             "name": entry["path"].split("/")[-1],
             "type": _TREE_TYPE_MAP.get(entry["type"], entry["type"]),
+            "size": entry.get("size"),
         }
         for entry in data.get("tree", [])
     ]
+
+
+async def get_file_content(owner: str, repo: str, path: str) -> str | None:
+    """
+    Fetch and decode the text content of a single file via the Contents API.
+
+    Returns None (rather than raising) when the file is missing, or when its
+    content cannot be interpreted as UTF-8 text (e.g. binary files, or files
+    GitHub declines to inline for size reasons), callers that are gathering
+    content for many files at once shouldn't have to special-case this.
+
+    Raises:
+        GitHubRateLimitError: if the rate limit has been exceeded (403).
+        GitHubAPIError: for any other unexpected error response.
+    """
+    url = f"{BASE_URL}/repos/{owner}/{repo}/contents/{path}"
+
+    async with httpx.AsyncClient(timeout=GITHUB_TIMEOUT) as client:
+        response = await client.get(url, headers=_build_headers())
+
+    if response.status_code == 404:
+        return None
+
+    _handle_error_response(response)
+
+    data = response.json()
+
+    # Directories and submodules resolve to a list or a non-file "type";
+    # only plain files with base64-encoded content are usable here.
+    if not isinstance(data, dict) or data.get("type") != "file":
+        return None
+    if data.get("encoding") != "base64" or "content" not in data:
+        return None
+
+    try:
+        raw_bytes = base64.b64decode(data["content"], validate=False)
+        return raw_bytes.decode("utf-8")
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return None
+
+
+async def get_repository_file_contents(
+    owner: str,
+    repo: str,
+    entries: list[dict],
+    filenames: frozenset[str] = CONTENT_TARGET_FILENAMES,
+) -> dict[str, str]:
+    """
+    Download the content of every entry useful for content-based detection.
+
+    Only files already known to exist (from `entries`, typically the output
+    of get_repository_tree) and whose name is in `filenames` are requested;
+    this never probes for files that may not exist, so it costs exactly one
+    API request per useful file found, and zero otherwise. Downloads run
+    concurrently. A failure fetching one file (rate limit, API error, or an
+    undecodable file) is skipped rather than failing the whole batch.
+
+    Args:
+        owner: Repository owner login.
+        repo: Repository name.
+        entries: Flat list of tree entries (path/name/type[/size]).
+        filenames: Set of lowercase filenames to consider. Defaults to
+            CONTENT_TARGET_FILENAMES.
+
+    Returns:
+        Dict mapping entry "path" to decoded text content, for every target
+        file that was successfully fetched and decoded.
+    """
+    targets = select_content_targets(entries, filenames)
+    if not targets:
+        return {}
+
+    results = await asyncio.gather(
+        *(get_file_content(owner, repo, entry["path"]) for entry in targets),
+        return_exceptions=True,
+    )
+
+    contents: dict[str, str] = {}
+    for entry, result in zip(targets, results):
+        if isinstance(result, (GitHubRateLimitError, GitHubAPIError)):
+            continue
+        if isinstance(result, BaseException):
+            raise result
+        if result is not None:
+            contents[entry["path"]] = result
+    return contents

@@ -7,7 +7,7 @@ caught regardless of rule changes.
 """
 
 from app.detector.engine import detect
-from app.detector.matchers import HasExtension, HasFilename
+from app.detector.matchers import HasDependency, HasExtension, HasFilename
 from app.detector.models import Entry, MatchResult, Rule, RuleCategory
 
 # Fixtures
@@ -98,3 +98,45 @@ class TestDetectEngine:
         rules = [PYTHON_RULE, DJANGO_RULE, CARGO_RULE]
         results = detect(entries, rules)
         assert [r.name for r in results] == ["Python", "Django", "Rust"]
+
+
+class TestDetectWithFileContents:
+    def test_passes_file_contents_through_to_matchers(self):
+        rule = Rule(
+            name="FastAPI",
+            matchers=[HasDependency("fastapi")],
+            category=RuleCategory.FRAMEWORK,
+            confidence=0.95,
+            priority=30,
+        )
+        entries = make_entries("requirements.txt")
+        results = detect(
+            entries, [rule], file_contents={"requirements.txt": "fastapi\n"}
+        )
+        assert [r.name for r in results] == ["FastAPI"]
+
+    def test_content_rule_does_not_match_without_file_contents(self):
+        rule = Rule(
+            name="FastAPI",
+            matchers=[HasDependency("fastapi")],
+            category=RuleCategory.FRAMEWORK,
+            confidence=0.95,
+            priority=30,
+        )
+        entries = make_entries("requirements.txt")
+        results = detect(entries, [rule])
+        assert results == []
+
+    def test_mixes_tree_and_content_matchers_in_same_rule(self):
+        rule = Rule(
+            name="Python FastAPI project",
+            matchers=[HasExtension(".py"), HasDependency("fastapi")],
+            category=RuleCategory.FRAMEWORK,
+            confidence=0.9,
+            priority=30,
+        )
+        entries = make_entries("main.py", "requirements.txt")
+        results = detect(
+            entries, [rule], file_contents={"requirements.txt": "fastapi\n"}
+        )
+        assert [r.name for r in results] == ["Python FastAPI project"]

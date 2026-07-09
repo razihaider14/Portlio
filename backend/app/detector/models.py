@@ -11,6 +11,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
+# Maps an Entry.path (e.g. "requirements.txt") to its decoded text content.
+# Only populated for the subset of files selected for download; see
+# app.github.content_targets.CONTENT_TARGET_FILENAMES.
+FileContents = dict[str, str]
+
 
 class RuleCategory(str, Enum):
     """
@@ -72,14 +77,24 @@ class Matcher(Protocol):
     """
     Protocol for a single detection condition.
     A matcher receives the complete, flat list of repository entries and
-    returns True if its condition is satisfied. Within a single matcher,
-    multiple candidate values use OR logic. Across matchers in a Rule,
-    AND logic applies — all matchers must pass for the rule to trigger.
-    Any class that implements `matches(entries: list[Entry]) -> bool` satisfies
-    this protocol without inheriting from it.
+    an optional mapping of file contents, and returns True if its condition
+    is satisfied. Within a single matcher, multiple candidate values use OR
+    logic. Across matchers in a Rule, AND logic applies : all matchers must
+    pass for the rule to trigger.
+    Any class that implements
+    `matches(entries: list[Entry], file_contents: FileContents | None) -> bool`
+    satisfies this protocol without inheriting from it.
+
+    file_contents maps an Entry.path to its decoded text content, and is
+    only populated for the small set of files the GitHub client selects for
+    download (see app.github.content_targets). It defaults to None/empty for
+    matchers, callers, and tests that only care about tree structure;
+    matchers that don't need file content simply ignore the parameter.
     """
 
-    def matches(self, entries: list[Entry]) -> bool:
+    def matches(
+        self, entries: list[Entry], file_contents: FileContents | None = None
+    ) -> bool:
         """Return True if this condition is satisfied by the given entries."""
         ...
 
