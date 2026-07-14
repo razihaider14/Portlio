@@ -6,30 +6,37 @@ from app.github.client import (
     get_repository_tree,
     get_user_repositories,
 )
+from app.metadata.metadata_analyzer import analyze_repository_metadata
 
 
 async def analyze_user_repositories(
     username: str, include_content: bool = False
 ) -> dict:
     """
-    Retrieve all public repositories for a user, recursively transverse each repository's full file tree, and detect technologies.
+    Retrieve all public repositories for a user, recursively transverse each repository's full file tree, detect technologies, and infer repository metadata.
     Repositories that are empty (no commits) will have an empty contents and technologies list.
 
     Args:
         username: GitHub username to analyze.
         include_content: If True, also download the content of files useful
-            for content-based detection (requirements.txt, package.json,
-            etc.; see app.github.content_targets) and use it internally to
-            improve technology detection via content-based matchers
-            (HasFileContent, HasDependency, ...). This costs one extra
-            GitHub API request per useful file found, so it's opt-in rather
-            than the default.
+            for content-based detection and metadata analysis
+            (requirements.txt, package.json, README.md, LICENSE, etc.;
+            see app.github.content_targets) and use it internally to
+            improve technology detection (HasFileContent, HasDependency,
+            ...) and metadata analysis (README structure, license text
+            matching, ...). This costs one extra GitHub API request per
+            useful file found, so it's opt-in rather than the default.
+            Metadata analysis still runs and returns useful results without
+            it, most fields (project type, tests, CI/CD, Docker, package
+            managers, build systems, license via the GitHub API, maturity,
+            size metrics) only need the tree and the GitHub repo API
+            response, both of which are always available.
 
     Note:
-        Downloaded file content is an internal detection detail only. It is
-        never included in the returned repository objects, regardless of
-        include_content, the response shape is identical either way except
-        for the "technologies" list.
+        Downloaded file content and raw GitHub repository metadata are
+        internal analysis details only. Neither is ever included in the
+        returned repository objects, the response only ever contains the
+        derived "technologies" and "metadata" fields.
     """
     repos = await get_user_repositories(username)
 
@@ -51,28 +58,30 @@ async def analyze_user_repositories(
 
     repositories = []
     for repo, tree, file_contents in zip(repos, trees, file_content_maps):
-        # This is what gets returned to the API caller. file_contents is
-        # deliberately never attached here as it's an internal detail of
-        # detection, not part of the public response shape.
+        # This is what gets returned to the API caller. file_contents and
+        # the raw GitHub repo object are deliberately never attached here,
+        # they're internal inputs to analysis, not part of the public
+        # response shape.
         repository = {
             "name": repo["name"],
             "language": repo.get("language"),
             "contents": tree,
         }
 
-        # detect_technologies() takes file_contents via a "file_contents"
-        # key on its input dict (see app.detector.detector). When we have
-        # content to offer, pass it through a throwaway shallow-copied dict
-        # instead of mutating `repository`, so the response object never
-        # carries it. This is a cheap shallow copy (a handful of keys,
-        # `tree` and `file_contents` are shared by reference, not
-        # duplicated), not a copy of the underlying data.
-        detection_input = (
-            {**repository, "file_contents": file_contents}
-            if file_contents
-            else repository
-        )
-        repository["technologies"] = detect_technologies(detection_input)
+        # detect_technologies() and analyze_repository_metadata() take
+        # file_contents/repo_metadata via keys on their input dict. When we
+        # have extra context to offer, pass it through a throwaway
+        # shallow-copied dict instead of mutating `repository`, so the
+        # response object never carries it. This is a cheap shallow copy (a
+        # handful of keys; `tree`, `file_contents`, and `repo` are shared by
+        # reference, not duplicated), not a copy of the underlying data.
+        analysis_input = dict(repository)
+        if file_contents:
+            analysis_input["file_contents"] = file_contents
+        analysis_input["repo_metadata"] = repo
+
+        repository["technologies"] = detect_technologies(analysis_input)
+        repository["metadata"] = analyze_repository_metadata(analysis_input)
         repositories.append(repository)
 
     return {

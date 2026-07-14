@@ -46,6 +46,7 @@ class TestAnalyzeUserRepositoriesContentOptIn:
             "language",
             "contents",
             "technologies",
+            "metadata",
         }
 
     @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
@@ -197,4 +198,103 @@ class TestFileContentsNeverLeaksToResponse:
             "language",
             "contents",
             "technologies",
+            "metadata",
         }
+
+
+class TestMetadataPipelineIntegration:
+    """
+    Confirms app.metadata is properly wired into analyze_user_repositories():
+    metadata is computed for every repository, runs even without
+    include_content, gets richer with it, and raw repo_metadata/file_contents
+    never leak into the response, mirroring the file_contents leak
+    guarantees already established for technology detection.
+    """
+
+    @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_repository_tree", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_user_repositories", new_callable=AsyncMock)
+    async def test_metadata_computed_without_include_content(
+        self, mock_repos, mock_tree, mock_content
+    ):
+        mock_repos.return_value = [
+            {
+                "name": "myrepo",
+                "language": "Python",
+                "owner": {"login": "octocat"},
+                "stargazers_count": 10,
+                "archived": False,
+            }
+        ]
+        mock_tree.return_value = [
+            {"path": "Dockerfile", "name": "Dockerfile", "type": "file"},
+            {"path": "Makefile", "name": "Makefile", "type": "file"},
+        ]
+
+        result = await analyze_user_repositories("octocat")
+
+        mock_content.assert_not_called()
+        metadata = result["repositories"][0]["metadata"]
+        assert metadata["has_docker"] is True
+        assert "Make" in metadata["build_systems"]
+        assert metadata["maturity"]["stars"] == 10
+
+    @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_repository_tree", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_user_repositories", new_callable=AsyncMock)
+    async def test_metadata_gets_richer_with_include_content(
+        self, mock_repos, mock_tree, mock_content
+    ):
+        mock_repos.return_value = [FAKE_REPO]
+        mock_tree.return_value = FAKE_TREE
+        mock_content.return_value = {"requirements.txt": "flask\npytest\n"}
+
+        result = await analyze_user_repositories("octocat", include_content=True)
+
+        metadata = result["repositories"][0]["metadata"]
+        assert "api_backend" in metadata["project_types"]
+        assert metadata["has_tests"] is True
+
+    @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_repository_tree", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_user_repositories", new_callable=AsyncMock)
+    async def test_repo_metadata_never_leaks_into_response(
+        self, mock_repos, mock_tree, mock_content
+    ):
+        mock_repos.return_value = [
+            {
+                "name": "myrepo",
+                "language": "Python",
+                "owner": {"login": "octocat"},
+                "stargazers_count": 999,
+                "html_url": "https://github.com/octocat/myrepo",
+                "private": False,
+            }
+        ]
+        mock_tree.return_value = FAKE_TREE
+
+        result = await analyze_user_repositories("octocat")
+
+        serialized = json.dumps(result)
+        assert "repo_metadata" not in serialized
+        assert "html_url" not in serialized
+        # The raw count is exposed only via the derived "maturity" field,
+        # not as a top-level leak of the whole GitHub repo object.
+        assert result["repositories"][0]["metadata"]["maturity"]["stars"] == 999
+
+    @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_repository_tree", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_user_repositories", new_callable=AsyncMock)
+    async def test_metadata_present_for_every_repository(
+        self, mock_repos, mock_tree, mock_content
+    ):
+        repo_a = {"name": "repo-a", "language": "Python", "owner": {"login": "octocat"}}
+        repo_b = {"name": "repo-b", "language": "Go", "owner": {"login": "octocat"}}
+        mock_repos.return_value = [repo_a, repo_b]
+        mock_tree.return_value = FAKE_TREE
+
+        result = await analyze_user_repositories("octocat")
+
+        for repository in result["repositories"]:
+            assert "metadata" in repository
+            assert "size_metrics" in repository["metadata"]

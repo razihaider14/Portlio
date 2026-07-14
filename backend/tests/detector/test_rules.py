@@ -481,6 +481,20 @@ class TestStm32:
         assert not has("STM32CubeIDE", repo(f("Core/Src/main.c")))
 
 
+class TestPCBDesignGerber:
+    def test_detected_by_top_copper_layer(self):
+        assert has("PCB Design (Gerber)", repo(f("Gerber_TopLayer.GTL")))
+
+    def test_detected_by_drill_file(self):
+        assert has("PCB Design (Gerber)", repo(f("Drill_PTH_Through.DRL")))
+
+    def test_detected_by_gerber_directory(self):
+        assert has("PCB Design (Gerber)", repo(d("Gerber"), f("Gerber/anything.txt")))
+
+    def test_not_detected_without_evidence(self):
+        assert not has("PCB Design (Gerber)", repo(f("main.py")))
+
+
 # Containers & Orchestration
 
 

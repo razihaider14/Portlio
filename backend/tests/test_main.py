@@ -51,6 +51,7 @@ class TestAnalyzeEndpointDefaultBehavior:
             "language",
             "contents",
             "technologies",
+            "metadata",
         }
         assert "file_contents" not in response.text
 
@@ -145,3 +146,103 @@ class TestAnalyzeEndpointWithContent:
         for repository in body["repositories"]:
             assert "file_contents" not in repository
         assert "file_contents" not in response.text
+
+
+class TestAnalyzeEndpointMetadata:
+    @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_repository_tree", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_user_repositories", new_callable=AsyncMock)
+    def test_metadata_field_present_in_response(
+        self, mock_repos, mock_tree, mock_content
+    ):
+        mock_repos.return_value = [FAKE_REPO]
+        mock_tree.return_value = FAKE_TREE
+
+        response = client.get("/analyze/octocat")
+
+        assert response.status_code == 200
+        metadata = response.json()["repositories"][0]["metadata"]
+        assert "project_types" in metadata
+        assert "documentation" in metadata
+        assert "license" in metadata
+        assert "maturity" in metadata
+        assert "size_metrics" in metadata
+
+    @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_repository_tree", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_user_repositories", new_callable=AsyncMock)
+    def test_metadata_computed_without_include_content(
+        self, mock_repos, mock_tree, mock_content
+    ):
+        mock_repos.return_value = [FAKE_REPO]
+        mock_tree.return_value = [
+            {"path": "Dockerfile", "name": "Dockerfile", "type": "file"},
+        ]
+
+        response = client.get("/analyze/octocat")
+
+        mock_content.assert_not_called()
+        assert response.json()["repositories"][0]["metadata"]["has_docker"] is True
+
+    @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_repository_tree", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_user_repositories", new_callable=AsyncMock)
+    def test_metadata_richer_with_include_content(
+        self, mock_repos, mock_tree, mock_content
+    ):
+        mock_repos.return_value = [FAKE_REPO]
+        mock_tree.return_value = FAKE_TREE
+        mock_content.return_value = {"requirements.txt": "flask\npytest\n"}
+
+        response = client.get("/analyze/octocat?include_content=true")
+
+        metadata = response.json()["repositories"][0]["metadata"]
+        assert "api_backend" in metadata["project_types"]
+        assert metadata["has_tests"] is True
+
+    @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_repository_tree", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_user_repositories", new_callable=AsyncMock)
+    def test_raw_repo_metadata_never_leaks_into_response(
+        self, mock_repos, mock_tree, mock_content
+    ):
+        mock_repos.return_value = [
+            {
+                "name": "myrepo",
+                "language": "Python",
+                "owner": {"login": "octocat"},
+                "html_url": "https://github.com/octocat/myrepo",
+                "clone_url": "https://github.com/octocat/myrepo.git",
+                "stargazers_count": 777,
+            }
+        ]
+        mock_tree.return_value = FAKE_TREE
+
+        response = client.get("/analyze/octocat")
+
+        assert "html_url" not in response.text
+        assert "clone_url" not in response.text
+        assert "repo_metadata" not in response.text
+        assert (
+            response.json()["repositories"][0]["metadata"]["maturity"]["stars"] == 777
+        )
+
+    @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_repository_tree", new_callable=AsyncMock)
+    @patch("app.analyzer.analyzer.get_user_repositories", new_callable=AsyncMock)
+    def test_response_shape_still_stable_with_metadata(
+        self, mock_repos, mock_tree, mock_content
+    ):
+        mock_repos.return_value = [FAKE_REPO]
+        mock_tree.return_value = FAKE_TREE
+
+        response = client.get("/analyze/octocat")
+
+        repository = response.json()["repositories"][0]
+        assert set(repository.keys()) == {
+            "name",
+            "language",
+            "contents",
+            "technologies",
+            "metadata",
+        }

@@ -32,7 +32,7 @@ import tomllib
 from dataclasses import dataclass
 from fnmatch import fnmatch
 
-from app.detector.dependency_parsers import (
+from app.parsing.dependency_parsers import (
     DEPENDENCY_PARSERS,
     normalize_dependency_name,
 )

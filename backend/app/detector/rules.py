@@ -408,6 +408,34 @@ RULES: list[Rule] = [
         confidence=1.0,
         priority=20,
     ),
+    Rule(
+        # Extended Gerber (RS-274X) layer files are PCB manufacturing
+        # output, produced by every major EDA tool (KiCad, EasyEDA, Eagle)
+        # regardless of which one authored the design. A "gerber/" export
+        # directory is also a near-universal convention. Either is
+        # unambiguous evidence of a physical PCB design in the repo.
+        name="PCB Design (Gerber)",
+        matchers=[
+            AnyOf(
+                HasExtension(
+                    ".gbr",
+                    ".gtl",
+                    ".gbl",
+                    ".gts",
+                    ".gbs",
+                    ".gto",
+                    ".gbo",
+                    ".gko",
+                    ".gml",
+                    ".drl",
+                ),
+                HasDirectory("gerber"),
+            )
+        ],
+        category=RuleCategory.EMBEDDED,
+        confidence=0.9,
+        priority=20,
+    ),
     # Containers & Orchestration
     Rule(
         # HasFileGlob with a literal (no wildcards) performs a case-insensitive

@@ -7,7 +7,7 @@ input (since HasDependency relies on parsers not raising on garbage).
 
 import pytest
 
-from app.detector.dependency_parsers import (
+from app.parsing.dependency_parsers import (
     normalize_dependency_name,
     parse_cargo_toml,
     parse_composer_json,
