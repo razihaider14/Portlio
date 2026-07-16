@@ -74,3 +74,61 @@ async def analyze_github_user(username: str, include_content: bool = False):
         )
     except (GitHubUserNotFoundError, GitHubRateLimitError, GitHubAPIError) as exc:
         _handle_github_exceptions(exc)
+
+
+@app.get("/skills/{username}")
+async def get_user_skills(username: str, include_content: bool = False):
+    """
+    Return only the portfolio-level skill report for a GitHub user: every
+    repository is analyzed exactly as in GET /analyze/{username}, but the
+    response contains just the aggregated result, not the per-repository
+    detail.
+
+    Args:
+        username: GitHub username to analyze.
+        include_content: Same meaning as on GET /analyze/{username}: opt
+            into downloading manifest/README content for richer technology
+            detection and metadata analysis, which in turn feeds richer
+            skill aggregation.
+
+    Returns:
+        {
+            "repository_count": int,
+            "skills": [
+                {
+                    "name": str,
+                    "category": str,
+                    "repository_count": int,
+                    "repositories": [str, ...],
+                    "average_detector_confidence": float,
+                    "average_practice_score": float,
+                    "score": int,
+                    "max_score": int,
+                    "tier": "expert" | "proficient" | "developing" | "exposure",
+                    "evidence": [str, ...],
+                },
+                ...
+            ],                      # every detected skill, score descending
+            "strengths": [...],     # subset of "skills" tiered "proficient"/"expert"
+            "weaknesses": [...],    # subset of "skills" tiered "exposure"
+            "recommendations": [
+                {
+                    "skill": str,
+                    "category": str,
+                    "reason": str,
+                    "based_on": [str, ...],
+                },
+                ...
+            ],
+        }
+        See app.aggregator.aggregator.aggregate_user_skills() for the
+        authoritative definition of this shape.
+    """
+    try:
+        analysis = await analyze_user_repositories(
+            username, include_content=include_content
+        )
+    except (GitHubUserNotFoundError, GitHubRateLimitError, GitHubAPIError) as exc:
+        _handle_github_exceptions(exc)
+
+    return analysis["portfolio"]

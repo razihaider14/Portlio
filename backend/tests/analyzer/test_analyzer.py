@@ -47,6 +47,7 @@ class TestAnalyzeUserRepositoriesContentOptIn:
             "contents",
             "technologies",
             "metadata",
+            "skills",
         }
 
     @patch("app.analyzer.analyzer.get_repository_file_contents", new_callable=AsyncMock)
@@ -199,6 +200,7 @@ class TestFileContentsNeverLeaksToResponse:
             "contents",
             "technologies",
             "metadata",
+            "skills",
         }
 
 

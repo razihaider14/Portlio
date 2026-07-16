@@ -52,6 +52,7 @@ class TestAnalyzeEndpointDefaultBehavior:
             "contents",
             "technologies",
             "metadata",
+            "skills",
         }
         assert "file_contents" not in response.text
 
@@ -245,4 +246,5 @@ class TestAnalyzeEndpointMetadata:
             "contents",
             "technologies",
             "metadata",
+            "skills",
         }
