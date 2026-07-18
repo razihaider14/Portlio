@@ -96,7 +96,8 @@ async def get_user_skills(username: str, include_content: bool = False):
             "repository_count": int,
             "skills": [
                 {
-                    "name": str,
+                    "name": str,           # e.g. "Django", or "ESP32" for a
+                                            # derived/composite skill
                     "category": str,
                     "repository_count": int,
                     "repositories": [str, ...],
@@ -106,23 +107,46 @@ async def get_user_skills(username: str, include_content: bool = False):
                     "max_score": int,
                     "tier": "expert" | "proficient" | "developing" | "exposure",
                     "evidence": [str, ...],
+                    "is_composite": bool,  # True for derived skills like
+                                            # "ESP32"/"IoT"/"Embedded Systems"
                 },
                 ...
-            ],                      # every detected skill, score descending
+            ],                      # every detected skill (including derived
+                                     # composites), score descending
             "strengths": [...],     # subset of "skills" tiered "proficient"/"expert"
-            "weaknesses": [...],    # subset of "skills" tiered "exposure"
+            "weaknesses": [
+                {
+                    "kind": "shallow_skill" | "limited_practice" | "limited_breadth",
+                    "name": str,           # a skill name for "shallow_skill";
+                                            # a human-readable label (e.g.
+                                            # "CI/CD", "Frontend Breadth")
+                                            # otherwise
+                    "category": str | None,  # None for "limited_practice"
+                    "description": str,
+                    "evidence": [str, ...],
+                },
+                ...
+            ],                      # NOT the same shape as "skills"; see
+                                     # app.aggregator.models.WeaknessKind
             "recommendations": [
                 {
                     "skill": str,
                     "category": str,
                     "reason": str,
-                    "based_on": [str, ...],
+                    "based_on": [str, ...],  # established root skill(s)
+                    "chain": [str, ...],     # hypothetical intermediate
+                                              # skill(s), e.g. ["FreeRTOS"]
+                                              # for an "ESP-IDF" recommendation
+                                              # reached via established
+                                              # "ESP32" -> "FreeRTOS" ->
+                                              # "ESP-IDF"; empty for a direct,
+                                              # 1-hop recommendation
                 },
                 ...
             ],
         }
         See app.aggregator.aggregator.aggregate_user_skills() for the
-        authoritative definition of this shape.
+        authoritative, field-by-field definition of this shape.
     """
     try:
         analysis = await analyze_user_repositories(

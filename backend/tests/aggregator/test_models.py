@@ -2,12 +2,14 @@ import pytest
 
 from app.aggregator.models import (
     PortfolioSkillReport,
+    PortfolioWeakness,
     RepositoryPractice,
     RepositorySkillData,
     SkillProfile,
     SkillRecommendation,
     SkillTier,
     TechnologyObservation,
+    WeaknessKind,
 )
 from app.detector.models import RuleCategory
 
@@ -75,16 +77,75 @@ class TestSkillProfile:
             average_detector_confidence=0.9,
             average_practice_score=3.0,
             score=5,
-            max_score=7,
+            max_score=8,
             tier=SkillTier.PROFICIENT,
             evidence=("some evidence",),
         )
         assert profile.tier is SkillTier.PROFICIENT
         assert profile.repositories == ("a", "b")
 
+    def test_is_composite_defaults_false(self):
+        profile = SkillProfile(
+            name="Python",
+            category=RuleCategory.LANGUAGE,
+            repository_count=1,
+            repositories=("a",),
+            average_detector_confidence=0.9,
+            average_practice_score=0.0,
+            score=1,
+            max_score=8,
+            tier=SkillTier.EXPOSURE,
+        )
+        assert profile.is_composite is False
+
+    def test_is_composite_can_be_set(self):
+        profile = SkillProfile(
+            name="ESP32",
+            category=RuleCategory.EMBEDDED,
+            repository_count=1,
+            repositories=("a",),
+            average_detector_confidence=0.9,
+            average_practice_score=0.0,
+            score=1,
+            max_score=8,
+            tier=SkillTier.EXPOSURE,
+            is_composite=True,
+        )
+        assert profile.is_composite is True
+
+
+class TestWeaknessKind:
+    def test_is_string_enum(self):
+        assert WeaknessKind.SHALLOW_SKILL == "shallow_skill"
+        assert WeaknessKind.LIMITED_PRACTICE.value == "limited_practice"
+        assert WeaknessKind.LIMITED_BREADTH.value == "limited_breadth"
+
+
+class TestPortfolioWeakness:
+    def test_shallow_skill_construction(self):
+        weakness = PortfolioWeakness(
+            kind=WeaknessKind.SHALLOW_SKILL,
+            name="Cobol",
+            category=RuleCategory.LANGUAGE,
+            description="minimal evidence",
+            evidence=("detected in 1 repository",),
+        )
+        assert weakness.kind is WeaknessKind.SHALLOW_SKILL
+        assert weakness.category is RuleCategory.LANGUAGE
+
+    def test_limited_practice_construction_has_no_category(self):
+        weakness = PortfolioWeakness(
+            kind=WeaknessKind.LIMITED_PRACTICE,
+            name="CI/CD",
+            category=None,
+            description="Only 1 of 10 repositories have CI/CD.",
+        )
+        assert weakness.category is None
+        assert weakness.evidence == ()
+
 
 class TestSkillRecommendation:
-    def test_construction(self):
+    def test_construction_defaults_empty_chain(self):
         rec = SkillRecommendation(
             skill="pytest",
             category=RuleCategory.TESTING,
@@ -93,6 +154,17 @@ class TestSkillRecommendation:
         )
         assert rec.skill == "pytest"
         assert rec.based_on == ("Django",)
+        assert rec.chain == ()
+
+    def test_construction_with_chain(self):
+        rec = SkillRecommendation(
+            skill="ESP-IDF",
+            category=RuleCategory.EMBEDDED,
+            reason="because",
+            based_on=("ESP32",),
+            chain=("FreeRTOS",),
+        )
+        assert rec.chain == ("FreeRTOS",)
 
 
 class TestPortfolioSkillReport:

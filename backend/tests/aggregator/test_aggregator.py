@@ -32,7 +32,9 @@ class TestNormalizationOfTechnologyInputShapes:
         repos = [
             {
                 "name": "repo-a",
-                "technologies": [{"name": "Django", "category": "framework", "confidence": 0.9}],
+                "technologies": [
+                    {"name": "Django", "category": "framework", "confidence": 0.9}
+                ],
                 "metadata": {},
             }
         ]
@@ -92,7 +94,12 @@ class TestAggregateUserSkillsShape:
         assert result["recommendations"] == []
 
     def test_repository_with_missing_metadata_key(self):
-        repos = [{"name": "repo-a", "technologies": [_match_dict("Python", category="language")]}]
+        repos = [
+            {
+                "name": "repo-a",
+                "technologies": [_match_dict("Python", category="language")],
+            }
+        ]
         result = aggregate_user_skills(repos)
         assert result["repository_count"] == 1
         assert result["skills"][0]["name"] == "Python"
@@ -107,7 +114,9 @@ class TestAggregateUserSkillsShape:
         repos = [
             {
                 "name": "repo-a",
-                "technologies": [_match_dict("Python", category="language", confidence=0.95)],
+                "technologies": [
+                    _match_dict("Python", category="language", confidence=0.95)
+                ],
                 "metadata": {"has_tests": True},
             }
         ]
@@ -117,26 +126,44 @@ class TestAggregateUserSkillsShape:
         assert isinstance(skill["tier"], str)
         assert isinstance(skill["repositories"], list)
         assert isinstance(skill["evidence"], list)
+        assert isinstance(skill["is_composite"], bool)
+
+    def test_weakness_entry_is_json_friendly(self):
+        repos = [
+            {"name": f"repo-{i}", "technologies": [], "metadata": {}} for i in range(3)
+        ]
+        result = aggregate_user_skills(repos)
+        assert result["weaknesses"], "expected at least one limited-practice weakness"
+        weakness = result["weaknesses"][0]
+        assert isinstance(weakness["kind"], str)
+        assert isinstance(weakness["name"], str)
+        assert weakness["category"] is None or isinstance(weakness["category"], str)
+        assert isinstance(weakness["description"], str)
+        assert isinstance(weakness["evidence"], list)
 
     def test_recommendation_entry_is_json_friendly(self):
         repos = [
             {
                 "name": f"repo-{i}",
-                "technologies": [_match_dict("Django", category="framework", confidence=1.0)],
+                "technologies": [
+                    _match_dict("Django", category="framework", confidence=1.0)
+                ],
                 "metadata": {
                     "has_tests": True,
                     "has_ci_cd": True,
                     "maturity": {"maturity_tier": "mature"},
                     "documentation": {"quality_tier": "excellent"},
+                    "has_docker": True,
                 },
             }
-            for i in range(4)
+            for i in range(2)
         ]
         result = aggregate_user_skills(repos)
         assert any(r["skill"] == "pytest" for r in result["recommendations"])
         rec = next(r for r in result["recommendations"] if r["skill"] == "pytest")
         assert isinstance(rec["category"], str)
         assert isinstance(rec["based_on"], list)
+        assert isinstance(rec["chain"], list)
 
 
 class TestAggregateUserSkillsDetailed:
@@ -148,7 +175,9 @@ class TestAggregateUserSkillsDetailed:
         repos = [
             {
                 "name": "repo-a",
-                "technologies": [_match_dict("Python", category="language", confidence=0.95)],
+                "technologies": [
+                    _match_dict("Python", category="language", confidence=0.95)
+                ],
                 "metadata": {"has_tests": True},
             }
         ]
@@ -237,7 +266,12 @@ class TestEndToEndIntegrationWithRealDetectorAndMetadata:
         assert all(isinstance(e, str) and e for e in django_skill["evidence"])
 
     def test_empty_repository_produces_no_skills(self):
-        raw_repo = {"name": "empty", "contents": [], "file_contents": {}, "repo_metadata": {}}
+        raw_repo = {
+            "name": "empty",
+            "contents": [],
+            "file_contents": {},
+            "repo_metadata": {},
+        }
         aggregator_repo = self._build_aggregator_repo(raw_repo)
         result = aggregate_user_skills([aggregator_repo])
         assert result["skills"] == []
@@ -249,12 +283,16 @@ class TestDeterminism:
         repos = [
             {
                 "name": "repo-a",
-                "technologies": [_match_dict("Python", category="language", confidence=0.9)],
+                "technologies": [
+                    _match_dict("Python", category="language", confidence=0.9)
+                ],
                 "metadata": {"has_tests": True},
             },
             {
                 "name": "repo-b",
-                "technologies": [_match_dict("Python", category="language", confidence=0.8)],
+                "technologies": [
+                    _match_dict("Python", category="language", confidence=0.8)
+                ],
                 "metadata": {},
             },
         ]
@@ -265,14 +303,224 @@ class TestDeterminism:
     def test_repository_order_does_not_affect_skill_aggregation(self):
         repo_a = {
             "name": "repo-a",
-            "technologies": [_match_dict("Python", category="language", confidence=0.9)],
+            "technologies": [
+                _match_dict("Python", category="language", confidence=0.9)
+            ],
             "metadata": {"has_tests": True},
         }
         repo_b = {
             "name": "repo-b",
-            "technologies": [_match_dict("Python", category="language", confidence=0.8)],
+            "technologies": [
+                _match_dict("Python", category="language", confidence=0.8)
+            ],
             "metadata": {},
         }
         result_forward = aggregate_user_skills([repo_a, repo_b])
         result_reversed = aggregate_user_skills([repo_b, repo_a])
         assert result_forward["skills"] == result_reversed["skills"]
+
+
+def _obs(name, category, confidence):
+    return TechnologyObservation(name=name, category=category, confidence=confidence)
+
+
+def _meta(
+    has_tests=False, has_ci_cd=False, maturity="unknown", doc="none", docker=False
+):
+    return {
+        "has_tests": has_tests,
+        "has_ci_cd": has_ci_cd,
+        "maturity": {"maturity_tier": maturity},
+        "documentation": {"quality_tier": doc},
+        "has_docker": docker,
+    }
+
+
+def razihaider14_portfolio_repos() -> list[dict]:
+    """
+    A reconstruction of the real `razihaider14` GitHub portfolio (10
+    repositories) used to report the recalibration issues this revision
+    fixes: HTML reaching "expert" purely on repository breadth, ESP32
+    work being invisible under the generic "Arduino" label, and
+    "weaknesses" almost always being empty.
+
+    Per-repository technology sets and each skill's average detector
+    confidence are taken directly from the real aggregated output that
+    was reported (each technology's detector confidence is a fixed
+    constant per app.detector.rules.Rule, so it's identical in every
+    repository it's detected in). Per-repository *practice* facts are
+    reconstructed to reproduce the exact reported average_practice_score
+    per skill (solving the small linear system implied by which
+    repositories share which skills), then intentionally distributed so
+    that Testing (2/10), CI/CD (3/10), and Documentation (3/10) all fall
+    below the reporting threshold, realistic for a personal/student
+    portfolio, and exactly what's needed to exercise the new
+    LIMITED_PRACTICE weakness detection end to end.
+    """
+    return [
+        {
+            "name": "NexEntry",
+            "technologies": [
+                _obs("HTML", RuleCategory.FRONTEND, 0.95),
+                _obs("Arduino", RuleCategory.EMBEDDED, 1.0),
+                _obs("C++", RuleCategory.LANGUAGE, 0.95),
+            ],
+            "metadata": _meta(maturity="active", doc="good"),
+        },
+        {
+            "name": "NexLedger",
+            "technologies": [
+                _obs("HTML", RuleCategory.FRONTEND, 0.95),
+                _obs("Arduino", RuleCategory.EMBEDDED, 1.0),
+                _obs("C++", RuleCategory.LANGUAGE, 0.95),
+            ],
+            "metadata": _meta(maturity="active", docker=True),
+        },
+        {
+            "name": "Sentinel",
+            "technologies": [
+                _obs("HTML", RuleCategory.FRONTEND, 0.95),
+                _obs("Arduino", RuleCategory.EMBEDDED, 1.0),
+            ],
+            "metadata": _meta(has_tests=True, maturity="active"),
+        },
+        {
+            "name": "razihaider14.github.io",
+            "technologies": [_obs("HTML", RuleCategory.FRONTEND, 0.95)],
+            "metadata": _meta(doc="good", maturity="active"),
+        },
+        {
+            "name": "Arduino-IoT-Projects",
+            "technologies": [_obs("Arduino", RuleCategory.EMBEDDED, 1.0)],
+            "metadata": _meta(has_ci_cd=True),
+        },
+        {
+            "name": "ESP32-RPi-MQTT",
+            "technologies": [_obs("Arduino", RuleCategory.EMBEDDED, 1.0)],
+            "metadata": _meta(maturity="active"),
+        },
+        {
+            "name": "ESP32-Tone-Console",
+            "technologies": [
+                _obs("Arduino", RuleCategory.EMBEDDED, 1.0),
+                _obs("C++", RuleCategory.LANGUAGE, 0.95),
+            ],
+            "metadata": _meta(has_ci_cd=True),
+        },
+        {
+            "name": "NexHub-v1",
+            "technologies": [_obs("PCB Design (Gerber)", RuleCategory.EMBEDDED, 0.9)],
+            "metadata": _meta(doc="good", maturity="active"),
+        },
+        {
+            "name": "ESP32-Deployed",
+            "technologies": [_obs("Python", RuleCategory.LANGUAGE, 0.95)],
+            "metadata": _meta(has_ci_cd=True, maturity="active"),
+        },
+        {
+            "name": "SkillForge",
+            "technologies": [
+                _obs("Python", RuleCategory.LANGUAGE, 0.95),
+                _obs("FastAPI", RuleCategory.FRAMEWORK, 0.95),
+                _obs("pytest", RuleCategory.TESTING, 0.95),
+            ],
+            "metadata": _meta(has_tests=True),
+        },
+    ]
+
+
+class TestRazihaider14PortfolioRegression:
+    """
+    Regression tests pinning down the exact behavior the recalibration
+    was asked to fix, using the reconstructed real portfolio above.
+    """
+
+    def test_repository_count(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        assert result["repository_count"] == 10
+
+    def test_html_no_longer_reaches_expert_on_breadth_alone(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        html = next(s for s in result["skills"] if s["name"] == "HTML")
+        assert html["repository_count"] == 4
+        assert html["tier"] != "expert"
+        assert html["tier"] == "proficient"
+
+    def test_esp32_skill_is_produced_distinct_from_arduino(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        names = {s["name"] for s in result["skills"]}
+        assert "Arduino" in names
+        assert "ESP32" in names
+
+        esp32 = next(s for s in result["skills"] if s["name"] == "ESP32")
+        assert esp32["is_composite"] is True
+        assert set(esp32["repositories"]) == {"ESP32-RPi-MQTT", "ESP32-Tone-Console"}
+        # the two general-purpose repos (NexEntry, NexLedger, Sentinel)
+        # must NOT count as ESP32 evidence just because they use Arduino
+        assert "NexEntry" not in esp32["repositories"]
+
+    def test_embedded_systems_and_iot_composites_present(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        names = {s["name"] for s in result["skills"]}
+        assert "Embedded Systems" in names
+        assert "IoT" in names
+
+        embedded = next(s for s in result["skills"] if s["name"] == "Embedded Systems")
+        # union of Arduino's 6 repos + PCB's 1 repo
+        assert embedded["repository_count"] == 7
+
+        iot = next(s for s in result["skills"] if s["name"] == "IoT")
+        assert set(iot["repositories"]) == {"Arduino-IoT-Projects", "ESP32-RPi-MQTT"}
+
+    def test_domain_specific_skills_are_not_starved_relative_to_generic_ones(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        by_name = {s["name"]: s for s in result["skills"]}
+        # ESP32 (2 repos, strong confidence+practice) scores competitively
+        # with Arduino (6 repos) despite far less breadth, breadth alone
+        # no longer decides the ranking
+        assert by_name["ESP32"]["score"] >= by_name["Arduino"]["score"] - 1
+
+    def test_weaknesses_are_no_longer_empty(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        assert result["weaknesses"] != []
+
+    def test_limited_ci_cd_and_testing_weaknesses_detected(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        limited_practice_names = {
+            w["name"] for w in result["weaknesses"] if w["kind"] == "limited_practice"
+        }
+        assert "CI/CD" in limited_practice_names
+        assert "Testing" in limited_practice_names
+
+    def test_limited_frontend_breadth_weakness_detected(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        breadth_weaknesses = {
+            w["name"] for w in result["weaknesses"] if w["kind"] == "limited_breadth"
+        }
+        assert "Frontend Breadth" in breadth_weaknesses
+
+    def test_recommendations_include_esp32_chain(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        recs = {r["skill"]: r for r in result["recommendations"]}
+        assert "FreeRTOS" in recs
+        assert recs["FreeRTOS"]["based_on"] == ["ESP32"]
+        assert "ESP-IDF" in recs
+        assert recs["ESP-IDF"]["chain"] == ["FreeRTOS"]
+
+    def test_recommendations_include_python_static_analysis_chain(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        recs = {r["skill"]: r for r in result["recommendations"]}
+        assert "Ruff" in recs
+        assert "Python" in recs["Ruff"]["based_on"]
+
+    def test_recommendations_are_no_longer_sparse(self):
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        # previously: Ruff, GitHub Actions (2 total). Recalibration adds
+        # the ESP32 -> FreeRTOS -> ESP-IDF chain on top.
+        assert len(result["recommendations"]) >= 4
+
+    def test_full_result_is_json_serializable(self):
+        import json
+
+        result = aggregate_user_skills(razihaider14_portfolio_repos())
+        json.dumps(result)  # raises on anything non-JSON-safe

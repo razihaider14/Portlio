@@ -30,6 +30,11 @@ Each "technologies" entry may be any of:
 "metadata" is expected to be analyze_repository_metadata()'s return value,
 but any dict (including {}) is accepted; missing keys simply contribute no
 evidence rather than raising.
+
+Response shape: see aggregate_user_skills()'s docstring below for the
+authoritative, field-by-field definition of every key this subsystem ever
+returns, including derived/composite skills, the three kinds of
+portfolio weakness, and chained recommendations.
 """
 
 from app.aggregator.engine import (
@@ -40,6 +45,7 @@ from app.aggregator.engine import (
 )
 from app.aggregator.models import (
     PortfolioSkillReport,
+    PortfolioWeakness,
     RepositorySkillData,
     SkillProfile,
     SkillRecommendation,
@@ -98,6 +104,17 @@ def _serialize_skill(profile: SkillProfile) -> dict:
         "max_score": profile.max_score,
         "tier": profile.tier.value,
         "evidence": list(profile.evidence),
+        "is_composite": profile.is_composite,
+    }
+
+
+def _serialize_weakness(weakness: PortfolioWeakness) -> dict:
+    return {
+        "kind": weakness.kind.value,
+        "name": weakness.name,
+        "category": weakness.category.value if weakness.category else None,
+        "description": weakness.description,
+        "evidence": list(weakness.evidence),
     }
 
 
@@ -107,6 +124,7 @@ def _serialize_recommendation(recommendation: SkillRecommendation) -> dict:
         "category": recommendation.category.value,
         "reason": recommendation.reason,
         "based_on": list(recommendation.based_on),
+        "chain": list(recommendation.chain),
     }
 
 
@@ -121,8 +139,9 @@ def aggregate_user_skills_detailed(repositories: list[dict]) -> PortfolioSkillRe
 
     Returns:
         A PortfolioSkillReport with every detected skill's SkillProfile
-        (including full evidence), its strengths and weaknesses subsets,
-        and complementary-skill recommendations.
+        (including derived composite skills, full evidence), its
+        strengths and weaknesses subsets, and complementary-skill
+        recommendations (possibly chained).
     """
     repository_data = _to_repository_skill_data(repositories)
     profiles = build_skill_profiles(repository_data)
@@ -130,7 +149,7 @@ def aggregate_user_skills_detailed(repositories: list[dict]) -> PortfolioSkillRe
         repository_count=len(repository_data),
         skills=tuple(profiles),
         strengths=tuple(detect_strengths(profiles)),
-        weaknesses=tuple(detect_weaknesses(profiles)),
+        weaknesses=tuple(detect_weaknesses(repository_data, profiles)),
         recommendations=tuple(generate_recommendations(profiles)),
     )
 
@@ -141,7 +160,7 @@ def aggregate_user_skills(repositories: list[dict]) -> dict:
     analyses into a portfolio-level skill summary.
 
     This is the stable public API: the return value always has exactly
-    the keys below, regardless of internal engine changes.
+    the top-level keys below, regardless of internal engine changes.
 
     Args:
         repositories: List of repository dicts; see the module docstring
@@ -150,21 +169,76 @@ def aggregate_user_skills(repositories: list[dict]) -> dict:
     Returns:
         {
             "repository_count": int,
-            "skills": [...],          # every detected skill, score descending
-            "strengths": [...],       # subset tiered "proficient"/"expert"
-            "weaknesses": [...],      # subset tiered "exposure"
-            "recommendations": [...], # missing complementary skills
+            "skills": [...],          # every detected skill (including
+                                       # derived composites), score
+                                       # descending then name
+            "strengths": [...],       # subset of "skills" tiered
+                                       # "proficient"/"expert"
+            "weaknesses": [...],      # see below, three kinds, NOT the
+                                       # same shape as "skills"/"strengths"
+            "recommendations": [...], # missing complementary skills,
+                                       # possibly chained
         }
-        Each skill entry mirrors SkillProfile's fields (JSON-friendly,
-        enums as their string value). Each recommendation entry mirrors
-        SkillRecommendation's fields.
+
+        Each "skills"/"strengths" entry:
+        {
+            "name": str,                 # e.g. "Django", or "ESP32" for
+                                          # a derived composite skill
+            "category": str,
+            "repository_count": int,
+            "repositories": [str, ...],
+            "average_detector_confidence": float,
+            "average_practice_score": float,
+            "score": int,                # see app.aggregator.rules for
+                                          # the current breadth/confidence/
+                                          # practice weighting
+            "max_score": int,            # app.aggregator.rules.SKILL_MAX_SCORE
+            "tier": "expert" | "proficient" | "developing" | "exposure",
+            "evidence": [str, ...],      # explains exactly how "score"
+                                          # was built, one line per
+                                          # sub-score plus (for composites)
+                                          # a line naming what it was
+                                          # rolled up from
+            "is_composite": bool,        # True for derived skills like
+                                          # "ESP32"/"IoT"/"Embedded Systems"
+        }
+
+        Each "weaknesses" entry (one of three kinds, see
+        app.aggregator.models.WeaknessKind):
+        {
+            "kind": "shallow_skill" | "limited_practice" | "limited_breadth",
+            "name": str,                 # a skill name for "shallow_skill";
+                                          # a human-readable label (e.g.
+                                          # "CI/CD", "Frontend Breadth")
+                                          # otherwise, NOT necessarily a
+                                          # detectable technology name
+            "category": str | None,      # None for "limited_practice"
+                                          # (portfolio-wide, not tied to
+                                          # one category)
+            "description": str,
+            "evidence": [str, ...],
+        }
+
+        Each "recommendations" entry:
+        {
+            "skill": str,
+            "category": str,
+            "reason": str,
+            "based_on": [str, ...],      # established, actually-detected
+                                          # root skill(s) this ultimately
+                                          # traces back to
+            "chain": [str, ...],         # hypothetical intermediate
+                                          # skill(s) walked through but not
+                                          # yet detected; empty for a
+                                          # direct (1-hop) recommendation
+        }
     """
     report = aggregate_user_skills_detailed(repositories)
     return {
         "repository_count": report.repository_count,
         "skills": [_serialize_skill(profile) for profile in report.skills],
         "strengths": [_serialize_skill(profile) for profile in report.strengths],
-        "weaknesses": [_serialize_skill(profile) for profile in report.weaknesses],
+        "weaknesses": [_serialize_weakness(weakness) for weakness in report.weaknesses],
         "recommendations": [
             _serialize_recommendation(rec) for rec in report.recommendations
         ],
