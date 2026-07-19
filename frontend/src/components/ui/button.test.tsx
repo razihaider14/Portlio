@@ -41,7 +41,7 @@ describe("Button", () => {
   it("renders as the child element when asChild is set, instead of a <button>", () => {
     render(
       <Button asChild>
-        <a href="/analyze">Analyze</a>
+        <a href="https://example.com/profile">Analyze</a>
       </Button>,
     );
     const link = screen.getByRole("link", { name: "Analyze" });

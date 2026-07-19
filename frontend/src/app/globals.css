@@ -47,6 +47,31 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+
+  /*
+   * Skill-tier tokens (Phase 2). One consistent color language for
+   * SkillTier across TierBadge, SkillCard, and the dashboard summary,
+   * soft tinted background + saturated foreground + a matching border,
+   * the same pattern used for every other semantic color in this file.
+   * Ordered violet (expert) -> emerald (proficient) -> amber (developing)
+   * -> slate (exposure): mastery down to "seen but unproven," each hue
+   * distinct enough to tell apart without relying on the text label alone.
+   */
+  --tier-expert-bg: oklch(0.94 0.035 302);
+  --tier-expert-fg: oklch(0.42 0.19 302);
+  --tier-expert-border: oklch(0.82 0.08 302);
+
+  --tier-proficient-bg: oklch(0.94 0.045 165);
+  --tier-proficient-fg: oklch(0.4 0.14 165);
+  --tier-proficient-border: oklch(0.8 0.09 165);
+
+  --tier-developing-bg: oklch(0.95 0.05 80);
+  --tier-developing-fg: oklch(0.45 0.15 80);
+  --tier-developing-border: oklch(0.82 0.1 80);
+
+  --tier-exposure-bg: oklch(0.96 0.005 260);
+  --tier-exposure-fg: oklch(0.45 0.02 260);
+  --tier-exposure-border: oklch(0.85 0.01 260);
 }
 
 .dark {
@@ -78,13 +103,29 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+
+  --tier-expert-bg: oklch(0.28 0.06 302);
+  --tier-expert-fg: oklch(0.82 0.12 302);
+  --tier-expert-border: oklch(0.4 0.1 302);
+
+  --tier-proficient-bg: oklch(0.28 0.06 165);
+  --tier-proficient-fg: oklch(0.78 0.14 165);
+  --tier-proficient-border: oklch(0.4 0.1 165);
+
+  --tier-developing-bg: oklch(0.3 0.07 80);
+  --tier-developing-fg: oklch(0.82 0.14 80);
+  --tier-developing-border: oklch(0.42 0.11 80);
+
+  --tier-exposure-bg: oklch(0.27 0.01 260);
+  --tier-exposure-fg: oklch(0.75 0.02 260);
+  --tier-exposure-border: oklch(0.4 0.02 260);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
 
-  /* System font stack for now — real typeface selection is a Phase 4
+  /* System font stack for now, real typeface selection is a Phase 4
      design decision, not a Phase 0 scaffold one; see layout.tsx. */
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
@@ -118,6 +159,22 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
+  --color-tier-expert-bg: var(--tier-expert-bg);
+  --color-tier-expert-fg: var(--tier-expert-fg);
+  --color-tier-expert-border: var(--tier-expert-border);
+
+  --color-tier-proficient-bg: var(--tier-proficient-bg);
+  --color-tier-proficient-fg: var(--tier-proficient-fg);
+  --color-tier-proficient-border: var(--tier-proficient-border);
+
+  --color-tier-developing-bg: var(--tier-developing-bg);
+  --color-tier-developing-fg: var(--tier-developing-fg);
+  --color-tier-developing-border: var(--tier-developing-border);
+
+  --color-tier-exposure-bg: var(--tier-exposure-bg);
+  --color-tier-exposure-fg: var(--tier-exposure-fg);
+  --color-tier-exposure-border: var(--tier-exposure-border);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

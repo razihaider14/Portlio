@@ -15,6 +15,12 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     css: true,
     exclude: ["node_modules", ".next", "e2e"],
+    env: {
+      // Matches src/test/msw/handlers.ts's API_BASE. Individual tests that
+      // need a different value (e.g. client.test.ts's "unset" case) save
+      // and restore process.env.NEXT_PUBLIC_API_BASE_URL themselves.
+      NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000",
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
