@@ -51,8 +51,8 @@ export function ProfileHeader({
               onError={() => setAvatarFailed(true)}
             />
           )}
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{username}</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold tracking-tight break-words">{username}</h1>
             <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
               <span>
                 {repositoryCount} {repositoryCount === 1 ? "repository" : "repositories"}{" "}

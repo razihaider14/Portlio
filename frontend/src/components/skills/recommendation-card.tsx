@@ -41,7 +41,7 @@ export function RecommendationCard({
     <Card className={cn("gap-3 py-5", className)}>
       <CardHeader className="px-5">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-base">{recommendation.skill}</CardTitle>
+          <CardTitle className="min-w-0 text-base break-words">{recommendation.skill}</CardTitle>
           <Badge variant="secondary" className="shrink-0">
             {categoryLabel(recommendation.category)}
           </Badge>

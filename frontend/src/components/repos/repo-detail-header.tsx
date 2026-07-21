@@ -43,8 +43,8 @@ export function RepoDetailHeader({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{repoName}</h1>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight break-words">{repoName}</h1>
           {language && (
             <p className="text-muted-foreground mt-1 text-sm">{language}</p>
           )}

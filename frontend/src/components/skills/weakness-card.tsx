@@ -44,13 +44,13 @@ export function WeaknessCard({ weakness, className }: WeaknessCardProps) {
     <Card className={cn("gap-3 py-5", className)}>
       <CardHeader className="px-5">
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-start gap-2">
+          <div className="flex min-w-0 items-start gap-2">
             <Icon
               aria-hidden="true"
               className="text-muted-foreground mt-0.5 size-4 shrink-0"
             />
-            <div>
-              <CardTitle className="text-base">{weakness.name}</CardTitle>
+            <div className="min-w-0">
+              <CardTitle className="text-base break-words">{weakness.name}</CardTitle>
               <p className="text-muted-foreground mt-0.5 text-xs">
                 {meta.label}
               </p>

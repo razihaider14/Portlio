@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { axe } from "jest-axe";
 import { render, screen } from "@testing-library/react";
 import AboutPage from "@/app/about/page";
 
@@ -23,5 +24,12 @@ describe("AboutPage", () => {
   it("renders the FAQ section", () => {
     render(<AboutPage />);
     expect(screen.getByText("Frequently asked questions")).toBeInTheDocument();
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations across the full composed page", async () => {
+      const { container } = render(<AboutPage />);
+      expect(await axe(container)).toHaveNoViolations();
+    });
   });
 });

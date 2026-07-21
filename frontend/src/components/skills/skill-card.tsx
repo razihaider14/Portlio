@@ -22,7 +22,7 @@ export function SkillCard({ skill, className }: SkillCardProps) {
   return (
     <Card className={cn("gap-4 py-5", className)}>
       <CardHeader className="gap-1 px-5">
-        <CardTitle className="flex items-center gap-1.5 text-base">
+        <CardTitle className="flex items-center gap-1.5 text-base break-words">
           {skill.name}
           {skill.is_composite && (
             <Layers

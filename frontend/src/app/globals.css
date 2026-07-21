@@ -202,3 +202,23 @@
     transform: translateX(400%);
   }
 }
+
+/*
+ * Respects the OS-level "reduce motion" accessibility preference globally,
+ * rather than requiring every animated component (Skeleton's pulse, the
+ * navigation progress bar's shimmer, hover/focus transitions) to opt in
+ * individually. Durations are shortened to ~0 instead of using `!important`
+ * on `animation: none`, since some animations (like the progress bar's
+ * width transition) still communicate real state changes that a person
+ * should be able to perceive — they just shouldn't be excessively motive.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

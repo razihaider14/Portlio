@@ -146,7 +146,7 @@ function NavigationProgressBar({ progress }: { progress: number }) {
         className="from-primary/60 via-primary to-primary/60 relative h-full bg-gradient-to-r shadow-[0_0_8px_var(--color-primary)] transition-[width] duration-200 ease-out"
         style={{ width: `${progress}%` }}
       >
-        <div className="absolute inset-y-0 left-0 w-16 animate-[nav-progress-shimmer_1.1s_ease-in-out_infinite] bg-white/40 blur-[2px]" />
+        <div className="animate-[nav-progress-shimmer_1.1s_ease-in-out_infinite] absolute inset-y-0 left-0 w-16 mix-blend-difference bg-white/40 blur-[2px] motion-reduce:hidden" />
       </div>
     </div>
   );

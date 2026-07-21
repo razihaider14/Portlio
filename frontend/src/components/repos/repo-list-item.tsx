@@ -19,7 +19,7 @@ export function RepoListItem({ repo, username, deepScan = false }: RepoListItemP
   return (
     <Card className="gap-3 py-5">
       <CardHeader className="px-5">
-        <CardTitle className="text-base">
+        <CardTitle className="text-base break-words">
           <Link
             href={withDeepScan(
               `/analyze/${encodeURIComponent(username)}/repos/${encodeURIComponent(repo.name)}`,
