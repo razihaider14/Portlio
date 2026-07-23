@@ -8,7 +8,7 @@ caught regardless of rule changes.
 
 from app.detector.engine import detect
 from app.detector.matchers import HasDependency, HasExtension, HasFilename
-from app.detector.models import Entry, MatchResult, Rule, RuleCategory
+from app.detector.models import EvidenceStrength, Entry, MatchResult, Rule, RuleCategory
 
 # Fixtures
 
@@ -16,6 +16,7 @@ PYTHON_RULE = Rule(
     name="Python",
     matchers=[HasExtension(".py")],
     category=RuleCategory.LANGUAGE,
+    evidence_strength=EvidenceStrength.DEMONSTRATED,
     confidence=0.95,
     priority=10,
 )
@@ -24,6 +25,7 @@ DJANGO_RULE = Rule(
     name="Django",
     matchers=[HasFilename("manage.py"), HasExtension(".py")],
     category=RuleCategory.FRAMEWORK,
+    evidence_strength=EvidenceStrength.DEMONSTRATED,
     confidence=0.95,
     priority=30,
 )
@@ -32,6 +34,7 @@ CARGO_RULE = Rule(
     name="Rust",
     matchers=[HasFilename("Cargo.toml")],
     category=RuleCategory.LANGUAGE,
+    evidence_strength=EvidenceStrength.DEMONSTRATED,
     confidence=1.0,
     priority=10,
 )
@@ -106,6 +109,7 @@ class TestDetectWithFileContents:
             name="FastAPI",
             matchers=[HasDependency("fastapi")],
             category=RuleCategory.FRAMEWORK,
+            evidence_strength=EvidenceStrength.DECLARED,
             confidence=0.95,
             priority=30,
         )
@@ -120,6 +124,7 @@ class TestDetectWithFileContents:
             name="FastAPI",
             matchers=[HasDependency("fastapi")],
             category=RuleCategory.FRAMEWORK,
+            evidence_strength=EvidenceStrength.DECLARED,
             confidence=0.95,
             priority=30,
         )
@@ -132,6 +137,7 @@ class TestDetectWithFileContents:
             name="Python FastAPI project",
             matchers=[HasExtension(".py"), HasDependency("fastapi")],
             category=RuleCategory.FRAMEWORK,
+            evidence_strength=EvidenceStrength.DEMONSTRATED,
             confidence=0.9,
             priority=30,
         )
@@ -140,3 +146,35 @@ class TestDetectWithFileContents:
             entries, [rule], file_contents={"requirements.txt": "fastapi\n"}
         )
         assert [r.name for r in results] == ["Python FastAPI project"]
+
+
+class TestEvidenceStrengthPropagation:
+    """Phase 6: Rule.evidence_strength must flow through detect() onto MatchResult unchanged."""
+
+    def test_evidence_strength_copied_onto_match_result(self):
+        rule = Rule(
+            name="Django",
+            matchers=[HasFilename("manage.py")],
+            category=RuleCategory.FRAMEWORK,
+            evidence_strength=EvidenceStrength.DEMONSTRATED,
+            confidence=0.95,
+            priority=30,
+        )
+        entries = make_entries("manage.py")
+        results = detect(entries, [rule])
+        assert results[0].evidence_strength is EvidenceStrength.DEMONSTRATED
+
+    def test_declared_evidence_strength_copied_onto_match_result(self):
+        rule = Rule(
+            name="FastAPI",
+            matchers=[HasDependency("fastapi")],
+            category=RuleCategory.FRAMEWORK,
+            evidence_strength=EvidenceStrength.DECLARED,
+            confidence=0.9,
+            priority=30,
+        )
+        entries = make_entries("requirements.txt")
+        results = detect(
+            entries, [rule], file_contents={"requirements.txt": "fastapi\n"}
+        )
+        assert results[0].evidence_strength is EvidenceStrength.DECLARED

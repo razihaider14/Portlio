@@ -8,7 +8,7 @@ from app.aggregator.aggregator import (
 )
 from app.aggregator.models import PortfolioSkillReport, SkillTier, TechnologyObservation
 from app.detector.detector import detect_technologies_detailed
-from app.detector.models import MatchResult, RuleCategory
+from app.detector.models import EvidenceStrength, MatchResult, RuleCategory
 from app.metadata.metadata_analyzer import analyze_repository_metadata
 
 
@@ -43,7 +43,11 @@ class TestNormalizationOfTechnologyInputShapes:
 
     def test_accepts_match_result_objects(self):
         match = MatchResult(
-            name="Django", category=RuleCategory.FRAMEWORK, confidence=0.9, priority=5
+            name="Django",
+            category=RuleCategory.FRAMEWORK,
+            confidence=0.9,
+            evidence_strength=EvidenceStrength.DEMONSTRATED,
+            priority=5,
         )
         repos = [{"name": "repo-a", "technologies": [match], "metadata": {}}]
         result = aggregate_user_skills(repos)
@@ -59,7 +63,11 @@ class TestNormalizationOfTechnologyInputShapes:
 
     def test_mixed_shapes_in_same_call(self):
         match = MatchResult(
-            name="Django", category=RuleCategory.FRAMEWORK, confidence=0.9, priority=5
+            name="Django",
+            category=RuleCategory.FRAMEWORK,
+            confidence=0.9,
+            evidence_strength=EvidenceStrength.DEMONSTRATED,
+            priority=5,
         )
         repos = [
             {"name": "repo-a", "technologies": [match], "metadata": {}},
@@ -164,6 +172,112 @@ class TestAggregateUserSkillsShape:
         assert isinstance(rec["category"], str)
         assert isinstance(rec["based_on"], list)
         assert isinstance(rec["chain"], list)
+
+
+class TestAggregateUserSkillsPhase6Fields:
+    """
+    Phase 6: detection_confidence/proficiency_tier are new, additive keys
+    on every skill entry. These tests guard the two halves of the
+    backward-compatibility contract: (1) the new keys are present and
+    correctly typed, and (2) the pre-existing "tier" key's possible values
+    are exactly the original four strings -- a tripwire independent of any
+    other test, so an accidental SkillTier value change (as opposed to the
+    intended additive ProficiencyTier) would be caught here even if every
+    other test happened not to exercise the affected value.
+    """
+
+    _ORIGINAL_TIER_VALUES = {"expert", "proficient", "developing", "exposure"}
+
+    def test_skill_entry_has_new_additive_keys(self):
+        repos = [
+            {
+                "name": "repo-a",
+                "technologies": [
+                    _match_dict("Python", category="language", confidence=0.95)
+                ],
+                "metadata": {"has_tests": True},
+            }
+        ]
+        result = aggregate_user_skills(repos)
+        skill = result["skills"][0]
+        assert "detection_confidence" in skill
+        assert "proficiency_tier" in skill
+        assert isinstance(skill["detection_confidence"], float)
+        assert isinstance(skill["proficiency_tier"], str)
+        assert skill["proficiency_tier"] in {
+            "exposure",
+            "used_once",
+            "comfortable",
+            "proficient",
+            "expert",
+        }
+
+    def test_tier_values_are_exactly_the_original_four_strings(self):
+        # Tripwire: fails if SkillTier is ever extended/renamed instead of
+        # ProficiencyTier being added alongside it (see
+        # app.aggregator.models.SkillTier's docstring for why that
+        # distinction matters -- "tier" is part of the undocumented-by-
+        # Pydantic, silently-breakable stable API).
+        repos = [
+            {
+                "name": f"repo-{i}",
+                "technologies": [
+                    _match_dict("Python", category="language", confidence=conf)
+                ],
+                "metadata": meta,
+            }
+            for i, (conf, meta) in enumerate(
+                [
+                    (0.5, {}),  # exposure-ish
+                    (0.95, {"has_tests": True, "has_ci_cd": True}),  # stronger
+                ]
+            )
+        ]
+        result = aggregate_user_skills(repos)
+        observed_tiers = {skill["tier"] for skill in result["skills"]}
+        assert observed_tiers <= self._ORIGINAL_TIER_VALUES
+
+    def test_accepts_dict_input_without_evidence_strength_key(self):
+        # The pre-Phase-6 input contract (a plain 3-key dict) must keep
+        # working unmodified -- evidence_strength is optional, not
+        # required, on the external input shape.
+        repos = [
+            {
+                "name": "repo-a",
+                "technologies": [_match_dict("Django")],  # no evidence_strength key
+                "metadata": {},
+            }
+        ]
+        result = aggregate_user_skills(repos)
+        assert result["skills"][0]["name"] == "Django"
+        # Falls back to TechnologyObservation's default (DEMONSTRATED), so
+        # detection_confidence should equal average_detector_confidence
+        # for this single, otherwise-unweighted occurrence.
+        skill = result["skills"][0]
+        assert skill["detection_confidence"] == skill["average_detector_confidence"]
+
+    def test_accepts_dict_input_with_string_evidence_strength(self):
+        repos = [
+            {
+                "name": "repo-a",
+                "technologies": [
+                    {
+                        "name": "SomeLib",
+                        "category": "framework",
+                        "confidence": 0.9,
+                        "evidence_strength": "declared",
+                    }
+                ],
+                "metadata": {},
+            }
+        ]
+        result = aggregate_user_skills(repos)
+        skill = result["skills"][0]
+        # A DECLARED-only occurrence must be discounted below its raw
+        # detector confidence in detection_confidence, while
+        # average_detector_confidence (legacy) stays the raw value.
+        assert skill["average_detector_confidence"] == 0.9
+        assert skill["detection_confidence"] < 0.9
 
 
 class TestAggregateUserSkillsDetailed:

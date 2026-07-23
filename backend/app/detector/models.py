@@ -44,6 +44,50 @@ class RuleCategory(str, Enum):
     STATIC_ANALYSIS = "static_analysis"  # ESLint, Ruff, mypy, ...
 
 
+class EvidenceStrength(str, Enum):
+    """
+    How strongly a matched Rule's signal proves the technology is actually
+    used, as opposed to merely referenced, scaffolded, or declared as an
+    intention.
+
+    Authored per-Rule, by hand, the same way `confidence`/`priority`
+    already are, not inferred dynamically from which individual Matcher
+    inside a Rule's (possibly multi-matcher, AND-combined) condition
+    happened to fire, since the engine only reports whether a Rule matched
+    as a whole. A Rule combining more than one matcher type takes the
+    strongest evidence class among them (e.g. a rule requiring both a
+    dependency line AND a matching config file is at least CONFIGURED, not
+    DECLARED), decided by the rule author at authoring time.
+
+    DECLARED:
+        The signal is a dependency-manifest entry only (e.g. a package
+        name listed in requirements.txt/package.json/Cargo.toml, or a
+        build-file substring equivalent to one, like "junit" appearing in
+        a pom.xml). Proves intent to use the technology, not that any code
+        actually exercises it, a dependency can be listed and never
+        imported.
+    CONFIGURED:
+        A dedicated, non-trivial config file, config section, or vendored
+        artifact exists and required deliberate setup beyond just listing
+        a dependency (e.g. a `[tool.ruff]` pyproject.toml section, a
+        vendored RTOS kernel directory). Stronger than a bare dependency
+        line; still short of proof the surrounding code actually exercises
+        the technology's behavior.
+    DEMONSTRATED:
+        A real, specific, hand-authored artifact or content match confirms
+        the technology is actually in use: a source file written in the
+        language/framework, a working CI pipeline definition, or matched
+        file content confirming actual usage.
+
+    See Phase 6 design decisions (2.1) in the Portlio Analysis Engine v2
+    architecture document for the full rationale.
+    """
+
+    DECLARED = "declared"
+    CONFIGURED = "configured"
+    DEMONSTRATED = "demonstrated"
+
+
 @dataclass(frozen=True)
 class Entry:
     """
@@ -114,6 +158,12 @@ class Rule:
         confidence: How reliable the detection signal is (0.0 - 1.0).
                     1.0 means no false positives are expected.
                     Use lower values for heuristics or directory-name guesses.
+        evidence_strength: How strongly this signal proves actual use
+                    rather than mere declared intent; see EvidenceStrength.
+                    Required, every rule author must explicitly classify
+                    it rather than silently inheriting an unreviewed
+                    default, since this value feeds skill-proficiency
+                    scoring (app.aggregator).
         priority:   Relative ordering within a result set. Higher values
                     surface more specific technologies above general ones.
                     Suggested scale: language=10, package_manager=20,
@@ -123,6 +173,7 @@ class Rule:
     name: str
     matchers: list[Matcher]
     category: RuleCategory
+    evidence_strength: EvidenceStrength
     confidence: float = field(default=1.0)
     priority: int = field(default=0)
 
@@ -145,10 +196,13 @@ class MatchResult:
         name:       Technology name. e.g. "Django"
         category:   Ecosystem category.
         confidence: Reliability score from the matched Rule (0.0 – 1.0).
+        evidence_strength: Copied from the matched Rule; see
+                    EvidenceStrength.
         priority:   Ordering hint from the matched Rule.
     """
 
     name: str
     category: RuleCategory
     confidence: float
+    evidence_strength: EvidenceStrength
     priority: int

@@ -3,6 +3,7 @@ import pytest
 from app.aggregator.models import (
     PortfolioSkillReport,
     PortfolioWeakness,
+    ProficiencyTier,
     RepositoryPractice,
     RepositorySkillData,
     SkillProfile,
@@ -79,6 +80,8 @@ class TestSkillProfile:
             score=5,
             max_score=8,
             tier=SkillTier.PROFICIENT,
+            detection_confidence=0.9,
+            proficiency_tier=ProficiencyTier.PROFICIENT,
             evidence=("some evidence",),
         )
         assert profile.tier is SkillTier.PROFICIENT
@@ -95,6 +98,8 @@ class TestSkillProfile:
             score=1,
             max_score=8,
             tier=SkillTier.EXPOSURE,
+            detection_confidence=0.9,
+            proficiency_tier=ProficiencyTier.EXPOSURE,
         )
         assert profile.is_composite is False
 
@@ -109,6 +114,8 @@ class TestSkillProfile:
             score=1,
             max_score=8,
             tier=SkillTier.EXPOSURE,
+            detection_confidence=0.9,
+            proficiency_tier=ProficiencyTier.EXPOSURE,
             is_composite=True,
         )
         assert profile.is_composite is True

@@ -40,6 +40,7 @@ def detect(
             name=rule.name,
             category=rule.category,
             confidence=rule.confidence,
+            evidence_strength=rule.evidence_strength,
             priority=rule.priority,
         )
         for rule in rules

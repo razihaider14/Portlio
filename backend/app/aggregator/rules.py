@@ -28,8 +28,8 @@ just showing up in a lot of repositories.
 from dataclasses import dataclass
 from typing import Callable
 
-from app.aggregator.models import SkillTier
-from app.detector.models import RuleCategory
+from app.aggregator.models import ProficiencyTier, SkillTier
+from app.detector.models import EvidenceStrength, RuleCategory
 
 # Repository practice rubric
 # One point per exact, checkable fact pulled straight from
@@ -180,6 +180,123 @@ def tier_for_score(score: int) -> SkillTier:
         if score >= threshold:
             return tier
     return SkillTier.EXPOSURE  # pragma: no cover - unreachable, thresholds start at 0
+
+
+# Evidence-strength-weighted detection confidence
+# ------------------------------------------------
+# Phase 6: app.detector.models.EvidenceStrength (declared / configured /
+# demonstrated) is now attached to every TechnologyObservation, but
+# `average_detector_confidence`/`score`/`tier` above are left completely
+# unmodified for backward compatibility (see app.aggregator.models.
+# SkillTier's docstring) -- they keep averaging raw per-occurrence detector
+# confidence, exactly as before Phase 6.
+#
+# detection_confidence() is the new, additive computation that actually
+# uses evidence_strength: it discounts an occurrence's confidence by how
+# strongly that evidence proves real use, e.g. a technology only ever seen
+# declared in a manifest (never demonstrated) ends up with a materially
+# lower detection_confidence than the same raw detector confidence would
+# suggest, even though average_detector_confidence treats it identically
+# to a demonstrated occurrence with the same detector confidence value.
+#
+# Weights are deliberately coarse, three tiers, not a continuous function:
+# matches app.detector.rules' own confidence scale's granularity, and
+# keeps every resulting number traceable to "which of the three evidence
+# classes was this" rather than an opaque blend.
+EVIDENCE_STRENGTH_WEIGHT: dict[EvidenceStrength, float] = {
+    EvidenceStrength.DECLARED: 0.6,
+    EvidenceStrength.CONFIGURED: 0.85,
+    EvidenceStrength.DEMONSTRATED: 1.0,
+}
+
+
+def detection_confidence(
+    occurrences: list[tuple[float, EvidenceStrength]],
+) -> float:
+    """
+    Evidence-strength-weighted mean detector confidence across a skill's
+    occurrences: mean(confidence * EVIDENCE_STRENGTH_WEIGHT[evidence_strength]).
+
+    Args:
+        occurrences: (detector_confidence, evidence_strength) pairs, one
+            per occurrence of the skill (i.e. one per repository it was
+            detected in).
+
+    Returns:
+        0.0 for an empty list of occurrences (defensive; build_skill_profiles
+        never calls this with an empty list in practice, since a profile
+        only exists when at least one occurrence produced it).
+    """
+    if not occurrences:
+        return 0.0
+    weighted_values = [
+        confidence * EVIDENCE_STRENGTH_WEIGHT[evidence_strength]
+        for confidence, evidence_strength in occurrences
+    ]
+    return sum(weighted_values) / len(weighted_values)
+
+
+# Five-tier proficiency model
+# ----------------------------
+# A finer-grained, additive alternative to SkillTier/tier_for_score()
+# above, computed from the SAME breadth_points()/confidence_points()/
+# practice_points() sub-scores but fed `detection_confidence()` (evidence-
+# weighted) rather than the plain `average_detector_confidence`, plus an
+# explicit USED_ONCE distinction that a single 0-8 score threshold cannot
+# express on its own (a lone demonstrated occurrence and a lone weak/
+# declared-only occurrence can land on the same raw score, but they are
+# not the same proficiency claim). See
+# app.aggregator.models.ProficiencyTier's docstring for the full
+# per-tier criteria and for what Phase 6 deliberately leaves out (recency,
+# the "advanced signal" EXPERT gate).
+def proficiency_tier_for(
+    repository_count: int,
+    raw_score: int,
+    has_demonstrated_evidence: bool,
+) -> ProficiencyTier:
+    """
+    Map a skill's evidence-weighted 0-8 raw score (breadth_points +
+    confidence_points(detection_confidence) + practice_points) to its
+    ProficiencyTier bucket, with an explicit carve-out for USED_ONCE that
+    a bare score threshold can't express.
+
+    Args:
+        repository_count: Distinct repositories this skill was detected in.
+        raw_score: breadth_points(...) + confidence_points(detection_confidence(...))
+            + practice_points(...), i.e. the same 0-8 scale as `score`, but
+            built from evidence-weighted confidence rather than the plain
+            average.
+        has_demonstrated_evidence: True if at least one occurrence's
+            evidence_strength is DEMONSTRATED.
+    """
+    if raw_score >= 7:
+        return ProficiencyTier.EXPERT
+    if raw_score >= 5:
+        return ProficiencyTier.PROFICIENT
+    if raw_score >= 3:
+        return ProficiencyTier.COMFORTABLE
+    if repository_count >= 1 and has_demonstrated_evidence:
+        return ProficiencyTier.USED_ONCE
+    return ProficiencyTier.EXPOSURE
+
+
+# Documents the (intentionally lossy) relationship between the new
+# five-tier ProficiencyTier and the legacy four-tier SkillTier, for
+# anyone migrating UI/consumers from one to the other later. NOT used to
+# compute the legacy `tier` field (which stays exactly tier_for_score(score),
+# unrelated to proficiency_tier_for()'s inputs), this mapping exists for
+# documentation/consistency-checking purposes only, per the Phase 6 plan's
+# backward-compatibility decision (2.2): introducing it as a live
+# computation path for `tier` risked subtly changing existing scores for
+# portfolios with any non-DEMONSTRATED evidence, which the plan explicitly
+# ruled out for this phase.
+SKILL_TIER_DOWNGRADE_MAP: dict[ProficiencyTier, SkillTier] = {
+    ProficiencyTier.EXPOSURE: SkillTier.EXPOSURE,
+    ProficiencyTier.USED_ONCE: SkillTier.EXPOSURE,
+    ProficiencyTier.COMFORTABLE: SkillTier.DEVELOPING,
+    ProficiencyTier.PROFICIENT: SkillTier.PROFICIENT,
+    ProficiencyTier.EXPERT: SkillTier.EXPERT,
+}
 
 
 # Composite (derived) skills

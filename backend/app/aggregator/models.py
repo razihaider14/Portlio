@@ -15,7 +15,7 @@ already that subsystem's public contract.
 from dataclasses import dataclass, field
 from enum import Enum
 
-from app.detector.models import RuleCategory
+from app.detector.models import EvidenceStrength, RuleCategory
 
 
 @dataclass(frozen=True)
@@ -28,11 +28,27 @@ class TechnologyObservation:
         name: Technology name, e.g. "Django".
         category: Ecosystem category from the detector's Rule.
         confidence: The detector's confidence for this match (0.0 - 1.0).
+        evidence_strength: How strongly this occurrence proves actual use
+            (declared / configured / demonstrated); see
+            app.detector.models.EvidenceStrength. Defaults to
+            DEMONSTRATED, unlike app.detector.models.Rule's identically-
+            named field (which is required): this dataclass is part of
+            app.aggregator.aggregator's public *input* contract (see that
+            module's docstring -- callers may pass a plain 3-key dict with
+            no evidence_strength at all), so forcing an explicit value
+            here would break that existing, documented input shape.
+            Defaulting to the strongest tier rather than the weakest is
+            deliberate: an occurrence built by a caller that predates this
+            field (or a test fixture unconcerned with evidence semantics)
+            should not be silently discounted in new evidence-weighted
+            scoring paths (see app.aggregator.rules.detection_confidence())
+            it was never written with in mind.
     """
 
     name: str
     category: RuleCategory
     confidence: float
+    evidence_strength: EvidenceStrength = EvidenceStrength.DEMONSTRATED
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.confidence <= 1.0:
@@ -93,12 +109,73 @@ class SkillTier(str, Enum):
     A portfolio-level skill's overall depth, bucketed from its point score.
     See app.aggregator.rules.tier_for_score() for the thresholds and
     app.aggregator.rules.SKILL_MAX_SCORE for the current maximum.
+
+    Kept exactly as-is (same four members, same values) alongside the newer
+    ProficiencyTier below rather than extended or renamed -- these values
+    are serialized verbatim as SkillProfile.tier in the stable public API
+    (see app.aggregator.aggregator.aggregate_user_skills()'s documented
+    response shape), and nothing in that API is Pydantic-enforced, so a
+    value change here would be a silent, non-compiler-caught breaking
+    change for any existing API consumer. See ProficiencyTier's docstring
+    for the additive, five-tier replacement and
+    SKILL_TIER_DOWNGRADE_MAP (app.aggregator.rules) for how the two relate.
     """
 
     EXPERT = "expert"
     PROFICIENT = "proficient"
     DEVELOPING = "developing"
     EXPOSURE = "exposure"
+
+
+class ProficiencyTier(str, Enum):
+    """
+    A finer-grained, five-level bucketing of a skill's depth, computed
+    independently of (and in parallel with) the legacy four-level
+    SkillTier above -- see app.aggregator.rules.proficiency_tier_for() for
+    the exact criteria.
+
+    Introduced alongside SkillProfile.detection_confidence as a
+    genuinely-additive field: SkillProfile.tier/.score/
+    .average_detector_confidence continue to be computed exactly as
+    before, byte-for-byte, so no existing consumer of those fields is
+    affected. proficiency_tier and detection_confidence are new fields on
+    the same SkillProfile, computed via a parallel, evidence-strength-aware
+    formula (see app.aggregator.rules.detection_confidence() and
+    .proficiency_tier_for()).
+
+    EXPOSURE:
+        Weak/corroborating-only evidence, or a single declared-only
+        occurrence with no demonstrated use at all.
+    USED_ONCE:
+        At least one DEMONSTRATED occurrence, but in exactly one
+        repository, with low-to-no supporting engineering practice and
+        insufficient combined breadth/confidence/practice to reach
+        COMFORTABLE. Distinguishes "tried it for real, once" from mere
+        EXPOSURE, a distinction the four-tier SkillTier collapses.
+    COMFORTABLE:
+        Real but modest depth: some demonstrated use with at least a
+        little supporting practice, or repeated (2+) weaker-evidence
+        occurrences.
+    PROFICIENT:
+        Solid, repeated, well-supported use.
+    EXPERT:
+        The strongest, most consistently well-supported use this rubric
+        can currently express.
+
+    Note (Phase 6 scope): this computation does not yet apply a recency
+    factor (all occurrences are weighted as if equally current -- see the
+    Phase 6 plan's decision 2.3, which defers per-signal recency to a
+    later phase pending real commit-history ingestion) or an
+    "advanced-signal" gate on EXPERT (see the v2 architecture document's
+    3.4, explicitly out of scope until Phase 7). Both are real,
+    intentional simplifications, not oversights.
+    """
+
+    EXPOSURE = "exposure"
+    USED_ONCE = "used_once"
+    COMFORTABLE = "comfortable"
+    PROFICIENT = "proficient"
+    EXPERT = "expert"
 
 
 @dataclass(frozen=True)
@@ -131,7 +208,24 @@ class SkillProfile:
             combine.
         max_score: The rubric's maximum possible score; see
             app.aggregator.rules.SKILL_MAX_SCORE.
-        tier: The bucketed SkillTier for `score`.
+        tier: The bucketed SkillTier for `score`. Legacy four-tier field,
+            computed exactly as before -- see `proficiency_tier` for the
+            newer, additive five-tier alternative.
+        detection_confidence: Evidence-strength-weighted mean detector
+            confidence across every occurrence of this skill; see
+            app.aggregator.rules.detection_confidence(). Distinct from
+            `average_detector_confidence` (the plain, unweighted mean,
+            kept unchanged for backward compatibility): this field
+            discounts occurrences whose evidence_strength is DECLARED or
+            CONFIGURED rather than DEMONSTRATED, so it is a more honest
+            "how sure are we this is really here, and really used" signal.
+            Equal to `average_detector_confidence` whenever every
+            occurrence is DEMONSTRATED.
+        proficiency_tier: The five-level ProficiencyTier for this skill,
+            computed from `detection_confidence` (not
+            `average_detector_confidence`) plus breadth and practice; see
+            app.aggregator.rules.proficiency_tier_for(). Independent of,
+            and not required to match, the legacy `tier` field.
         evidence: Human-readable breakdown of how `score` was built.
         is_composite: True if this skill was derived from other detected
             technologies (see app.aggregator.rules.COMPOSITE_SKILL_RULES)
@@ -147,6 +241,8 @@ class SkillProfile:
     score: int
     max_score: int
     tier: SkillTier
+    detection_confidence: float
+    proficiency_tier: ProficiencyTier
     evidence: tuple[str, ...] = ()
     is_composite: bool = False
 

@@ -12,12 +12,13 @@ from tests.conftest import f, repo
 from app.detector import detector as detector_module
 from app.detector.detector import detect_technologies, detect_technologies_detailed
 from app.detector.matchers import HasDependency
-from app.detector.models import Rule, RuleCategory
+from app.detector.models import EvidenceStrength, Rule, RuleCategory
 
 CUSTOM_RULE = Rule(
     name="Custom Content Rule",
     matchers=[HasDependency("some-package")],
     category=RuleCategory.FRAMEWORK,
+    evidence_strength=EvidenceStrength.DECLARED,
     confidence=0.9,
     priority=30,
 )

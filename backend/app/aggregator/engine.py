@@ -27,6 +27,7 @@ from statistics import mean
 
 from app.aggregator.models import (
     PortfolioWeakness,
+    ProficiencyTier,
     RepositoryPractice,
     RepositorySkillData,
     SkillProfile,
@@ -50,10 +51,12 @@ from app.aggregator.rules import (
     CompositeSkillRule,
     breadth_points,
     confidence_points,
+    detection_confidence,
     practice_points,
+    proficiency_tier_for,
     tier_for_score,
 )
-from app.detector.models import RuleCategory
+from app.detector.models import EvidenceStrength, RuleCategory
 
 _Occurrence = tuple[str, TechnologyObservation, RepositoryPractice]
 
@@ -120,9 +123,9 @@ def _composite_occurrences(
     evidence for one CompositeSkillRule: drawn from its base technologies'
     own occurrences, filtered by repository-name keyword if the rule has
     any. The composite's own TechnologyObservation reuses the contributing
-    base technology's real detector confidence (never invents one), so the
-    composite's average_detector_confidence stays an honest reflection of
-    actual detection.
+    base technology's real detector confidence and evidence_strength
+    (never invents either), so the composite's average_detector_confidence/
+    detection_confidence stay an honest reflection of actual detection.
     """
     matches: list[_Occurrence] = []
     for base_name in rule.base_technologies:
@@ -132,7 +135,10 @@ def _composite_occurrences(
             ):
                 continue
             composite_observation = TechnologyObservation(
-                name=rule.name, category=rule.category, confidence=technology.confidence
+                name=rule.name,
+                category=rule.category,
+                confidence=technology.confidence,
+                evidence_strength=technology.evidence_strength,
             )
             matches.append((repository_name, composite_observation, practice))
     return matches
@@ -159,6 +165,12 @@ def build_skill_profiles(
     portfolio, plus one SkillProfile per composite skill in
     app.aggregator.rules.COMPOSITE_SKILL_RULES that has sufficient
     evidence. See app.aggregator.rules for the scoring rubric.
+
+    Each profile carries both the legacy `score`/`tier`/
+    `average_detector_confidence` (computed exactly as before Phase 6, for
+    backward compatibility) and the newer, additive `detection_confidence`/
+    `proficiency_tier` (evidence-strength-weighted; see
+    app.aggregator.rules.detection_confidence()/.proficiency_tier_for()).
 
     Args:
         repositories: One RepositorySkillData per repository, combining
@@ -197,6 +209,29 @@ def build_skill_profiles(
         practice_score = practice_points(average_practice)
         total_score = breadth + confidence_score + practice_score
 
+        # Phase 6, additive: detection_confidence/proficiency_tier are
+        # computed here from the SAME occurrences but via the
+        # evidence-strength-weighted path (see app.aggregator.rules).
+        # `average_confidence`/`confidence_score`/`total_score` above, and
+        # `tier_for_score(total_score)` below, are left completely
+        # untouched -- they keep feeding the legacy `average_detector_
+        # confidence`/`score`/`tier` fields exactly as before Phase 6, so
+        # no existing consumer of those fields sees any behavior change.
+        weighted_confidence = detection_confidence(
+            [(tech.confidence, tech.evidence_strength) for _, tech, _ in entries]
+        )
+        weighted_confidence_score = confidence_points(weighted_confidence)
+        proficiency_raw_score = breadth + weighted_confidence_score + practice_score
+        has_demonstrated_evidence = any(
+            tech.evidence_strength == EvidenceStrength.DEMONSTRATED
+            for _, tech, _ in entries
+        )
+        proficiency_tier = proficiency_tier_for(
+            repository_count=repository_count,
+            raw_score=proficiency_raw_score,
+            has_demonstrated_evidence=has_demonstrated_evidence,
+        )
+
         evidence = [
             f"detected in {repository_count} "
             f"repositor{'y' if repository_count == 1 else 'ies'} "
@@ -224,6 +259,8 @@ def build_skill_profiles(
                 score=total_score,
                 max_score=SKILL_MAX_SCORE,
                 tier=tier_for_score(total_score),
+                detection_confidence=weighted_confidence,
+                proficiency_tier=proficiency_tier,
                 evidence=tuple(evidence),
                 is_composite=is_composite,
             )

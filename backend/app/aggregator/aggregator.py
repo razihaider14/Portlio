@@ -25,7 +25,12 @@ Each "technologies" entry may be any of:
     - an app.aggregator.models.TechnologyObservation,
     - or a plain dict with "name", "category", and "confidence" keys
       (e.g. a MatchResult round-tripped through JSON, with "category" as
-      either the RuleCategory enum or its string value).
+      either the RuleCategory enum or its string value). An "evidence_strength"
+      key (either an app.detector.models.EvidenceStrength enum or its
+      string value: "declared" | "configured" | "demonstrated") is
+      accepted but optional on all three shapes -- omitting it (e.g. for
+      callers/data that predate Phase 6) defaults to "demonstrated"; see
+      app.aggregator.models.TechnologyObservation for why.
 
 "metadata" is expected to be analyze_repository_metadata()'s return value,
 but any dict (including {}) is accepted; missing keys simply contribute no
@@ -51,7 +56,7 @@ from app.aggregator.models import (
     SkillRecommendation,
     TechnologyObservation,
 )
-from app.detector.models import RuleCategory
+from app.detector.models import EvidenceStrength, RuleCategory
 
 
 def _normalize_technology(technology) -> TechnologyObservation:
@@ -62,19 +67,32 @@ def _normalize_technology(technology) -> TechnologyObservation:
     name = getattr(technology, "name", None)
     category = getattr(technology, "category", None)
     confidence = getattr(technology, "confidence", None)
+    evidence_strength = getattr(technology, "evidence_strength", None)
     if (
         name is None
     ):  # not an attribute-based object (e.g. MatchResult); try dict access
         name = technology["name"]
         category = technology["category"]
         confidence = technology["confidence"]
+        # evidence_strength is optional on the plain-dict input shape (see
+        # module docstring): older callers, or a MatchResult round-tripped
+        # through JSON from before Phase 6, may not include it at all.
+        # Falling back to None here (rather than raising a KeyError) lets
+        # TechnologyObservation's own default (EvidenceStrength.DEMONSTRATED,
+        # see app.aggregator.models) apply, exactly as if the key had never
+        # existed -- required to keep this input contract backward
+        # compatible.
+        evidence_strength = technology.get("evidence_strength")
 
     if isinstance(category, str):
         category = RuleCategory(category)
+    if isinstance(evidence_strength, str):
+        evidence_strength = EvidenceStrength(evidence_strength)
 
-    return TechnologyObservation(
-        name=name, category=category, confidence=float(confidence)
-    )
+    kwargs = dict(name=name, category=category, confidence=float(confidence))
+    if evidence_strength is not None:
+        kwargs["evidence_strength"] = evidence_strength
+    return TechnologyObservation(**kwargs)
 
 
 def _to_repository_skill_data(repositories: list[dict]) -> list[RepositorySkillData]:
@@ -103,6 +121,8 @@ def _serialize_skill(profile: SkillProfile) -> dict:
         "score": profile.score,
         "max_score": profile.max_score,
         "tier": profile.tier.value,
+        "detection_confidence": round(profile.detection_confidence, 4),
+        "proficiency_tier": profile.proficiency_tier.value,
         "evidence": list(profile.evidence),
         "is_composite": profile.is_composite,
     }
@@ -194,6 +214,23 @@ def aggregate_user_skills(repositories: list[dict]) -> dict:
                                           # practice weighting
             "max_score": int,            # app.aggregator.rules.SKILL_MAX_SCORE
             "tier": "expert" | "proficient" | "developing" | "exposure",
+            "detection_confidence": float,   # NEW (Phase 6): evidence-
+                                          # strength-weighted mean detector
+                                          # confidence; see
+                                          # app.aggregator.rules.
+                                          # detection_confidence(). Equal to
+                                          # "average_detector_confidence"
+                                          # whenever every occurrence of
+                                          # this skill is "demonstrated"
+                                          # evidence; lower otherwise.
+            "proficiency_tier":          # NEW (Phase 6): "exposure" |
+                "used_once" | "comfortable" | "proficient" | "expert",
+                                          # a finer-grained, additive
+                                          # alternative to "tier"; computed
+                                          # independently and not
+                                          # guaranteed to agree with it.
+                                          # See app.aggregator.models.
+                                          # ProficiencyTier.
             "evidence": [str, ...],      # explains exactly how "score"
                                           # was built, one line per
                                           # sub-score plus (for composites)

@@ -8,16 +8,27 @@ from app.aggregator.engine import (
     score_repository_practice,
 )
 from app.aggregator.models import (
+    ProficiencyTier,
     RepositorySkillData,
     SkillTier,
     TechnologyObservation,
     WeaknessKind,
 )
-from app.detector.models import RuleCategory
+from app.detector.models import EvidenceStrength, RuleCategory
 
 
-def obs(name, category=RuleCategory.LANGUAGE, confidence=0.9):
-    return TechnologyObservation(name=name, category=category, confidence=confidence)
+def obs(
+    name,
+    category=RuleCategory.LANGUAGE,
+    confidence=0.9,
+    evidence_strength=EvidenceStrength.DEMONSTRATED,
+):
+    return TechnologyObservation(
+        name=name,
+        category=category,
+        confidence=confidence,
+        evidence_strength=evidence_strength,
+    )
 
 
 def metadata(
@@ -279,6 +290,187 @@ class TestBuildSkillProfilesBaseScoring:
         ]
         profiles = build_skill_profiles(repos)
         assert profiles[0].category == RuleCategory.FRAMEWORK
+
+
+class TestBuildSkillProfilesEvidenceStrength:
+    """
+    Phase 6: detection_confidence/proficiency_tier are new, additive
+    fields computed from evidence_strength -- these tests prove (a) they
+    behave sensibly on their own, and (b) critically, that the legacy
+    score/tier/average_detector_confidence fields are completely
+    unaffected by evidence_strength, regardless of what it is set to.
+    That second guarantee is the actual backward-compatibility contract;
+    it's asserted directly here rather than only implied by "old tests
+    still pass unmodified".
+    """
+
+    def test_legacy_fields_are_identical_regardless_of_evidence_strength(self):
+        # Same confidence/practice/breadth in both cases; only
+        # evidence_strength differs. Legacy score/tier/
+        # average_detector_confidence must come out byte-identical.
+        declared_repos = [
+            RepositorySkillData(
+                name="repo-a",
+                technologies=(
+                    obs(
+                        "SomeLib",
+                        confidence=0.95,
+                        evidence_strength=EvidenceStrength.DECLARED,
+                    ),
+                ),
+                metadata=metadata(has_tests=True, has_ci_cd=True),
+            )
+        ]
+        demonstrated_repos = [
+            RepositorySkillData(
+                name="repo-a",
+                technologies=(
+                    obs(
+                        "SomeLib",
+                        confidence=0.95,
+                        evidence_strength=EvidenceStrength.DEMONSTRATED,
+                    ),
+                ),
+                metadata=metadata(has_tests=True, has_ci_cd=True),
+            )
+        ]
+
+        declared_profile = build_skill_profiles(declared_repos)[0]
+        demonstrated_profile = build_skill_profiles(demonstrated_repos)[0]
+
+        assert declared_profile.score == demonstrated_profile.score
+        assert declared_profile.tier == demonstrated_profile.tier
+        assert (
+            declared_profile.average_detector_confidence
+            == demonstrated_profile.average_detector_confidence
+        )
+
+    def test_declared_only_skill_has_lower_detection_confidence_than_demonstrated(self):
+        declared_repos = [
+            RepositorySkillData(
+                name="repo-a",
+                technologies=(
+                    obs(
+                        "SomeLib",
+                        confidence=0.95,
+                        evidence_strength=EvidenceStrength.DECLARED,
+                    ),
+                ),
+                metadata={},
+            )
+        ]
+        demonstrated_repos = [
+            RepositorySkillData(
+                name="repo-a",
+                technologies=(
+                    obs(
+                        "SomeLib",
+                        confidence=0.95,
+                        evidence_strength=EvidenceStrength.DEMONSTRATED,
+                    ),
+                ),
+                metadata={},
+            )
+        ]
+
+        declared_profile = build_skill_profiles(declared_repos)[0]
+        demonstrated_profile = build_skill_profiles(demonstrated_repos)[0]
+
+        assert (
+            declared_profile.detection_confidence
+            < demonstrated_profile.detection_confidence
+        )
+        # ... but average_detector_confidence (legacy) is identical, per
+        # the previous test -- detection_confidence is the only place the
+        # discount shows up.
+        assert (
+            declared_profile.average_detector_confidence
+            == demonstrated_profile.average_detector_confidence
+        )
+
+    def test_demonstrated_evidence_can_reach_used_once_where_declared_cannot(self):
+        # A single, low-scoring occurrence: DEMONSTRATED evidence reaches
+        # USED_ONCE; otherwise-identical DECLARED-only evidence stays at
+        # EXPOSURE. This is the exact distinction ProficiencyTier.USED_ONCE
+        # exists to draw (see its docstring).
+        declared_repos = [
+            RepositorySkillData(
+                name="repo-a",
+                technologies=(
+                    obs(
+                        "NicheLib",
+                        confidence=0.7,
+                        evidence_strength=EvidenceStrength.DECLARED,
+                    ),
+                ),
+                metadata={},
+            )
+        ]
+        demonstrated_repos = [
+            RepositorySkillData(
+                name="repo-a",
+                technologies=(
+                    obs(
+                        "NicheLib",
+                        confidence=0.7,
+                        evidence_strength=EvidenceStrength.DEMONSTRATED,
+                    ),
+                ),
+                metadata={},
+            )
+        ]
+
+        declared_profile = build_skill_profiles(declared_repos)[0]
+        demonstrated_profile = build_skill_profiles(demonstrated_repos)[0]
+
+        assert declared_profile.proficiency_tier == ProficiencyTier.EXPOSURE
+        assert demonstrated_profile.proficiency_tier == ProficiencyTier.USED_ONCE
+
+    def test_fully_demonstrated_skill_has_matching_confidence_and_score_fields(self):
+        # When every occurrence is DEMONSTRATED (the TechnologyObservation
+        # default, and the common case pre-Phase-6), detection_confidence
+        # equals average_detector_confidence exactly, and proficiency_tier
+        # agrees with the legacy tier's downgrade-map counterpart for a
+        # clear-cut, unambiguous case.
+        repos = [
+            RepositorySkillData(
+                name="repo-a",
+                technologies=(obs("Python", confidence=0.95),),
+                metadata=metadata(has_tests=True, has_ci_cd=True),
+            )
+        ]
+        profile = build_skill_profiles(repos)[0]
+        assert profile.detection_confidence == profile.average_detector_confidence
+        assert profile.tier == SkillTier.PROFICIENT
+        assert profile.proficiency_tier == ProficiencyTier.PROFICIENT
+
+    def test_composite_skill_inherits_base_technology_evidence_strength(self):
+        # ESP32 is a composite rolled up from Arduino/PlatformIO/ESP-IDF
+        # occurrences (see app.aggregator.rules.COMPOSITE_SKILL_RULES) --
+        # its synthesized TechnologyObservation must carry the real base
+        # technology's evidence_strength, not silently default to
+        # DEMONSTRATED regardless of what the base occurrence actually was.
+        repos = [
+            RepositorySkillData(
+                name="esp32-blink",
+                technologies=(
+                    obs(
+                        "Arduino",
+                        category=RuleCategory.EMBEDDED,
+                        confidence=1.0,
+                        evidence_strength=EvidenceStrength.DECLARED,
+                    ),
+                ),
+                metadata={},
+            )
+        ]
+        profiles = {p.name: p for p in build_skill_profiles(repos)}
+        assert "ESP32" in profiles
+        esp32 = profiles["ESP32"]
+        # DECLARED-only base evidence must discount ESP32's
+        # detection_confidence below its raw average_detector_confidence,
+        # exactly as it would for a directly-detected skill.
+        assert esp32.detection_confidence < esp32.average_detector_confidence
 
 
 class TestCompositeSkillDerivation:
